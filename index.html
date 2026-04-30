@@ -52,6 +52,10 @@ var cdns = [
    'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js']
 ];
 var pdfUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+var firebaseUrls = [
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js'
+];
 
 async function loadReact() {
   for (var i = 0; i < cdns.length; i++) {
@@ -72,6 +76,10 @@ loadReact().then(async function(ok) {
   try { await loadScript(pdfUrl); } catch(e) { console.warn('PDF.js failed to load', e); }
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  // Load Firebase
+  for (var fi = 0; fi < firebaseUrls.length; fi++) {
+    try { await loadScript(firebaseUrls[fi]); } catch(e) { console.warn('Firebase script failed:', e); }
   }
   initApp();
 });
@@ -146,7 +154,7 @@ const ACCOUNTS_DATA = [{
   createdAt: "2025-08-05"
 }, {
   id: 7,
-  phone: "050-000-0001",
+  phone: "050-4941658",
   name: "קורל שקוי",
   role: "admin",
   installerId: null,
@@ -2068,23 +2076,80 @@ const SignaturePad = ({
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Firebase config
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAXl5mtwMWkUkKqH6gdeYx-2SOcR58l5fk",
+  authDomain: "bariline-crm.firebaseapp.com",
+  projectId: "bariline-crm",
+  storageBucket: "bariline-crm.firebasestorage.app",
+  messagingSenderId: "1042161550667",
+  appId: "1:1042161550667:web:61a07d439a34c4705b94ce"
+};
+
+// Helper: normalize phone to match accounts (050-4941658 format)
+const normalizePhoneForMatch = phone => {
+  const digits = phone.replace(/\D/g, "");
+  // If starts with 972, strip it
+  const local = digits.startsWith("972") ? "0" + digits.slice(3) : digits;
+  // Format as 0XX-XXXXXXX
+  if (local.length === 10) return local.slice(0, 3) + "-" + local.slice(3);
+  return phone;
+};
+
+// Helper: convert local Israeli phone to E.164
+const phoneToE164 = phone => {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("972")) return "+" + digits;
+  if (digits.startsWith("0")) return "+972" + digits.slice(1);
+  return "+972" + digits;
+};
 const LoginScreen = ({
   accounts,
   onLogin
 }) => {
-  const [step, setStep] = useState("phone"); // phone | code | selecting
+  const [step, setStep] = useState("phone"); // phone | code
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const recaptchaRef = useRef(null);
+  const confirmationRef = useRef(null);
+  const firebaseInitRef = useRef(false);
   useEffect(() => {
     if (countdown > 0) {
       const t = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(t);
     }
   }, [countdown]);
-  const sendCode = () => {
-    const account = accounts.find(a => a.phone === phone);
+
+  // Initialize Firebase on mount
+  useEffect(() => {
+    if (firebaseInitRef.current) return;
+    try {
+      if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length === 0) {
+        firebase.initializeApp(FIREBASE_CONFIG);
+      }
+      firebaseInitRef.current = true;
+    } catch (e) {
+      console.error("Firebase init error:", e);
+    }
+  }, []);
+  const setupRecaptcha = () => {
+    if (recaptchaRef.current) return;
+    try {
+      recaptchaRef.current = new firebase.auth.RecaptchaVerifier("recaptcha-container", {
+        size: "invisible",
+        callback: () => {}
+      });
+    } catch (e) {
+      console.error("reCAPTCHA error:", e);
+    }
+  };
+  const sendCode = async () => {
+    // Check if phone exists in accounts
+    const normalizedPhone = normalizePhoneForMatch(phone);
+    const account = accounts.find(a => a.phone === normalizedPhone);
     if (!account) {
       setError("מספר טלפון לא נמצא במערכת");
       return;
@@ -2094,18 +2159,75 @@ const LoginScreen = ({
       return;
     }
     setError("");
-    setStep("code");
-    setCountdown(30);
+    setLoading(true);
+    try {
+      setupRecaptcha();
+      const e164 = phoneToE164(phone);
+      const confirmationResult = await firebase.auth().signInWithPhoneNumber(e164, recaptchaRef.current);
+      confirmationRef.current = confirmationResult;
+      setStep("code");
+      setCountdown(60);
+    } catch (e) {
+      console.error("SMS send error:", e);
+      if (e.code === "auth/too-many-requests") {
+        setError("נשלחו יותר מדי בקשות. נסה שוב מאוחר יותר.");
+      } else if (e.code === "auth/invalid-phone-number") {
+        setError("מספר טלפון לא תקין");
+      } else if (e.code === "auth/quota-exceeded") {
+        setError("חרגת ממכסת ה-SMS. נסה שוב מחר.");
+      } else {
+        setError("שגיאה בשליחת קוד: " + (e.message || "נסה שוב"));
+      }
+      // Reset reCAPTCHA for retry
+      if (recaptchaRef.current) {
+        try {
+          recaptchaRef.current.clear();
+        } catch (ex) {}
+        recaptchaRef.current = null;
+      }
+    }
+    setLoading(false);
   };
-  const verifyCode = () => {
-    if (code.length === 4) {
-      const account = accounts.find(a => a.phone === phone);
+  const verifyCode = async () => {
+    if (code.length < 6) {
+      setError("יש להזין קוד בן 6 ספרות");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      await confirmationRef.current.confirm(code);
+      // Auth successful — find the matching account
+      const normalizedPhone = normalizePhoneForMatch(phone);
+      const account = accounts.find(a => a.phone === normalizedPhone);
       if (account) {
         onLogin(account);
+      } else {
+        setError("האימות הצליח אך המספר לא נמצא במערכת");
       }
-    } else {
-      setError("יש להזין קוד בן 4 ספרות");
+    } catch (e) {
+      console.error("Code verify error:", e);
+      if (e.code === "auth/invalid-verification-code") {
+        setError("קוד אימות שגוי. נסה שוב.");
+      } else if (e.code === "auth/code-expired") {
+        setError("הקוד פג תוקף. בקש קוד חדש.");
+      } else {
+        setError("שגיאה באימות: " + (e.message || "נסה שוב"));
+      }
     }
+    setLoading(false);
+  };
+  const resendCode = () => {
+    if (countdown > 0) return;
+    // Reset reCAPTCHA
+    if (recaptchaRef.current) {
+      try {
+        recaptchaRef.current.clear();
+      } catch (ex) {}
+      recaptchaRef.current = null;
+    }
+    setCode("");
+    setStep("phone");
   };
   return /*#__PURE__*/React.createElement("div", {
     dir: "rtl",
@@ -2182,7 +2304,7 @@ const LoginScreen = ({
       fontSize: 13,
       color: colors.textLight
     }
-  }, "הזינו את מספר הטלפון שלכם לקבלת קוד אימות"), /*#__PURE__*/React.createElement(FormField, {
+  }, "הזינו את מספר הטלפון שלכם לקבלת קוד אימות ב-SMS"), /*#__PURE__*/React.createElement(FormField, {
     label: "מספר טלפון"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2194,7 +2316,7 @@ const LoginScreen = ({
       setPhone(e.target.value);
       setError("");
     },
-    placeholder: "054-555-1234",
+    placeholder: "050-4941658",
     style: {
       ...inputStyle,
       padding: "12px 40px 12px 12px",
@@ -2202,7 +2324,7 @@ const LoginScreen = ({
       direction: "ltr",
       textAlign: "right"
     },
-    onKeyDown: e => e.key === "Enter" && sendCode()
+    onKeyDown: e => e.key === "Enter" && !loading && sendCode()
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
@@ -2228,52 +2350,8 @@ const LoginScreen = ({
       justifyContent: "center",
       borderRadius: 10
     },
-    disabled: !phone
-  }, "שלח קוד אימות"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 20,
-      padding: "14px",
-      background: colors.bg,
-      borderRadius: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      fontWeight: 600,
-      color: colors.textLight,
-      marginBottom: 8
-    }
-  }, "כניסה מהירה לדמו:"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      flexDirection: "column",
-      gap: 4
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    onClick: () => setPhone("050-000-0001"),
-    style: {
-      fontSize: 12,
-      color: colors.primary,
-      cursor: "pointer",
-      padding: "4px 0"
-    }
-  }, "050-000-0001 — קורל שקוי (מנהל)"), /*#__PURE__*/React.createElement("div", {
-    onClick: () => setPhone("054-555-1234"),
-    style: {
-      fontSize: 12,
-      color: colors.primary,
-      cursor: "pointer",
-      padding: "4px 0"
-    }
-  }, "054-555-1234 — דוד כהן (מתקין)"), /*#__PURE__*/React.createElement("div", {
-    onClick: () => setPhone("050-555-9012"),
-    style: {
-      fontSize: 12,
-      color: colors.primary,
-      cursor: "pointer",
-      padding: "4px 0"
-    }
-  }, "050-555-9012 — יוסי פרץ (מתקין)")))), step === "code" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", {
+    disabled: !phone || loading
+  }, loading ? "שולח..." : "שלח קוד אימות")), step === "code" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", {
     style: {
       margin: "0 0 4px",
       fontSize: 18,
@@ -2286,34 +2364,27 @@ const LoginScreen = ({
       fontSize: 13,
       color: colors.textLight
     }
-  }, "קוד אימות נשלח ל-", phone), /*#__PURE__*/React.createElement(FormField, {
-    label: "קוד אימות (4 ספרות)"
+  }, "קוד אימות נשלח ב-SMS ל-", phone), /*#__PURE__*/React.createElement(FormField, {
+    label: "קוד אימות (6 ספרות)"
   }, /*#__PURE__*/React.createElement("input", {
     value: code,
     onChange: e => {
-      setCode(e.target.value.replace(/\D/g, "").slice(0, 4));
+      setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
       setError("");
     },
-    placeholder: "1234",
-    maxLength: 4,
+    placeholder: "123456",
+    maxLength: 6,
     style: {
       ...inputStyle,
       padding: "14px",
       fontSize: 24,
       textAlign: "center",
-      letterSpacing: 12,
+      letterSpacing: 10,
       direction: "ltr",
       fontWeight: 700
     },
-    onKeyDown: e => e.key === "Enter" && verifyCode()
-  })), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 12,
-      color: colors.textMuted,
-      margin: "0 0 14px",
-      textAlign: "center"
-    }
-  }, "לצורך הדמו — הזינו כל 4 ספרות"), error && /*#__PURE__*/React.createElement("div", {
+    onKeyDown: e => e.key === "Enter" && !loading && verifyCode()
+  })), error && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "8px 12px",
       background: colors.dangerLight,
@@ -2330,8 +2401,8 @@ const LoginScreen = ({
       justifyContent: "center",
       borderRadius: 10
     },
-    disabled: code.length < 4
-  }, "אימות וכניסה"), /*#__PURE__*/React.createElement("div", {
+    disabled: code.length < 6 || loading
+  }, loading ? "מאמת..." : "אימות וכניסה"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -2342,6 +2413,12 @@ const LoginScreen = ({
       setStep("phone");
       setCode("");
       setError("");
+      if (recaptchaRef.current) {
+        try {
+          recaptchaRef.current.clear();
+        } catch (ex) {}
+        recaptchaRef.current = null;
+      }
     },
     style: {
       background: "none",
@@ -2352,7 +2429,7 @@ const LoginScreen = ({
       fontFamily: "inherit"
     }
   }, "חזרה"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => countdown === 0 && setCountdown(30),
+    onClick: resendCode,
     disabled: countdown > 0,
     style: {
       background: "none",
@@ -2362,7 +2439,9 @@ const LoginScreen = ({
       color: countdown > 0 ? colors.textMuted : colors.primary,
       fontFamily: "inherit"
     }
-  }, countdown > 0 ? `שליחה חוזרת בעוד ${countdown} שניות` : "שלח קוד חדש"))))));
+  }, countdown > 0 ? `שליחה חוזרת בעוד ${countdown} שניות` : "שלח קוד חדש")))), /*#__PURE__*/React.createElement("div", {
+    id: "recaptcha-container"
+  })));
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
