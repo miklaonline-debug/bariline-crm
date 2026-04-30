@@ -1502,6 +1502,18 @@ const Icons = {
   }))
 };
 
+// ─── useIsMobile Hook ────────────────────────────────────────────────────────
+
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return isMobile;
+};
+
 // ─── Style Constants ─────────────────────────────────────────────────────────
 
 const colors = {
@@ -2452,6 +2464,7 @@ const DashboardPage = ({
   serviceCalls,
   setPage
 }) => {
+  const isMobile = useIsMobile();
   const today = "2026-04-14";
   const todayJobs = workOrders.filter(w => w.scheduledDate === today);
   const active = workOrders.filter(w => ["in-progress", "scheduled", "pending"].includes(w.status));
@@ -2525,7 +2538,7 @@ const DashboardPage = ({
   }, "יום שלישי, 14 באפריל 2026 — ", todayJobs.length, " עבודות היום")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(140px, 1fr))",
       gap: 14,
       marginBottom: 20
     }
@@ -2610,7 +2623,7 @@ const DashboardPage = ({
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: 14,
       marginBottom: 20
     }
@@ -2709,7 +2722,7 @@ const DashboardPage = ({
   }, a.time))))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: 14,
       marginBottom: 20
     }
@@ -2960,6 +2973,7 @@ const InstallersPage = ({
   installers,
   workOrders
 }) => {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(null);
@@ -3015,7 +3029,7 @@ const InstallersPage = ({
   }, v))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))",
       gap: 14
     }
   }, filtered.map(inst => /*#__PURE__*/React.createElement(Card, {
@@ -3208,6 +3222,7 @@ const PhotoImportModal = ({
   onCreateOrder,
   installers
 }) => {
+  const isMobile = useIsMobile();
   const [mode, setMode] = useState("choose");
   const [pdfStatus, setPdfStatus] = useState("");
   const [parsed, setParsed] = useState({
@@ -3470,7 +3485,7 @@ const PhotoImportModal = ({
   }, Icons.check, " פרטי לקוח חולצו מה-PDF"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: "0 12px"
     }
   }, /*#__PURE__*/React.createElement(FormField, {
@@ -3733,6 +3748,7 @@ const WorkOrdersPage = ({
   serviceCalls,
   initialFilter
 }) => {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(initialFilter || "all");
   const [showCreate, setShowCreate] = useState(false);
@@ -4867,7 +4883,7 @@ const WorkOrdersPage = ({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: "0 14px"
     }
   }, /*#__PURE__*/React.createElement(FormField, {
@@ -5139,7 +5155,7 @@ const WorkOrdersPage = ({
     })), " צפה ב-PDF הזמנה")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
+        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
         gap: 10,
         marginBottom: 16
       }
@@ -6197,6 +6213,7 @@ const ServiceCallsPage = ({
   role,
   installerId
 }) => {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [installerFilter, setInstallerFilter] = useState("all");
@@ -6561,7 +6578,7 @@ const ServiceCallsPage = ({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: 12,
       marginBottom: 16
     }
@@ -6753,7 +6770,7 @@ const ServiceCallsPage = ({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: "0 12px"
     }
   }, /*#__PURE__*/React.createElement(FormField, {
@@ -6930,6 +6947,7 @@ const ServiceCallsPage = ({
 const CustomersPage = ({
   workOrders
 }) => {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const filtered = CUSTOMERS_DATA.filter(c => c.name.includes(search) || c.email.toLowerCase().includes(search.toLowerCase()) || c.address.includes(search));
@@ -7299,6 +7317,7 @@ const ReportsPage = ({
   workOrders,
   installers
 }) => {
+  const isMobile = useIsMobile();
   const completed = workOrders.filter(w => w.status === "completed");
   const totalRevenue = completed.reduce((s, w) => s + w.amount, 0);
   const installerStats = installers.map(inst => {
@@ -7342,7 +7361,7 @@ const ReportsPage = ({
   }, "סקירה חודשית — אפריל 2026")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(160px, 1fr))",
       gap: 14,
       marginBottom: 20
     }
@@ -7370,7 +7389,7 @@ const ReportsPage = ({
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: 14
     }
   }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("h3", {
@@ -7541,6 +7560,7 @@ const AccountsPage = ({
   setAccounts,
   installers
 }) => {
+  const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
@@ -8009,6 +8029,7 @@ const BarakIntegrationPage = ({
   setWorkOrders,
   installers
 }) => {
+  const isMobile = useIsMobile();
   const [connected, setConnected] = useState(true);
   const [apiKey, setApiKey] = useState("brk_live_a1b2c3d4e5f6g7h8i9j0");
   const [webhookUrl] = useState("https://glasspro.app/api/webhook/barak");
@@ -8209,7 +8230,7 @@ const BarakIntegrationPage = ({
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(160px, 1fr))",
       gap: 14,
       marginBottom: 20
     }
@@ -8255,7 +8276,7 @@ const BarakIntegrationPage = ({
   }), tab === "overview" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
       gap: 14
     }
   }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("h3", {
@@ -8895,7 +8916,7 @@ const BarakIntegrationPage = ({
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState("dashboard");
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [workOrders, setWorkOrders] = useState(WORK_ORDERS_DATA);
   const [installers] = useState(INSTALLERS_DATA);
@@ -9269,7 +9290,7 @@ function App() {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      padding: "10px 20px",
+      padding: isMobile ? "10px 12px" : "10px 20px",
       background: colors.card,
       borderBottom: `1px solid ${colors.border}`,
       flexShrink: 0
@@ -9344,7 +9365,7 @@ function App() {
       position: "absolute",
       top: 36,
       left: 0,
-      width: 340,
+      width: isMobile ? 280 : 340,
       background: colors.card,
       borderRadius: 12,
       boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
@@ -9380,7 +9401,7 @@ function App() {
     style: {
       flex: 1,
       overflow: "auto",
-      padding: 20
+      padding: isMobile ? 10 : 20
     }
   }, renderPage())));
 }
