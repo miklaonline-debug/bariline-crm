@@ -2116,6 +2116,7 @@ const LoginScreen = ({
   const recaptchaRef = useRef(null);
   const confirmationRef = useRef(null);
   const firebaseInitRef = useRef(false);
+  const recaptchaWidgetId = useRef(null);
   useEffect(() => {
     if (countdown > 0) {
       const t = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -2135,16 +2136,30 @@ const LoginScreen = ({
       console.error("Firebase init error:", e);
     }
   }, []);
-  const setupRecaptcha = () => {
-    if (recaptchaRef.current) return;
-    try {
-      recaptchaRef.current = new firebase.auth.RecaptchaVerifier("recaptcha-container", {
-        size: "invisible",
-        callback: () => {}
-      });
-    } catch (e) {
-      console.error("reCAPTCHA error:", e);
+  const resetRecaptcha = () => {
+    // Clear existing reCAPTCHA completely
+    if (recaptchaRef.current) {
+      try {
+        recaptchaRef.current.clear();
+      } catch (ex) {}
+      recaptchaRef.current = null;
     }
+    // Also clear the DOM container to prevent "already rendered" error
+    const container = document.getElementById("recaptcha-container");
+    if (container) {
+      container.innerHTML = "";
+    }
+    recaptchaWidgetId.current = null;
+  };
+  const getRecaptchaVerifier = () => {
+    // Always reset before creating new one
+    resetRecaptcha();
+    const verifier = new firebase.auth.RecaptchaVerifier("recaptcha-container", {
+      size: "invisible",
+      callback: () => {}
+    });
+    recaptchaRef.current = verifier;
+    return verifier;
   };
   const sendCode = async () => {
     // Check if phone exists in accounts
@@ -2161,14 +2176,15 @@ const LoginScreen = ({
     setError("");
     setLoading(true);
     try {
-      setupRecaptcha();
+      const verifier = getRecaptchaVerifier();
       const e164 = phoneToE164(phone);
-      const confirmationResult = await firebase.auth().signInWithPhoneNumber(e164, recaptchaRef.current);
+      const confirmationResult = await firebase.auth().signInWithPhoneNumber(e164, verifier);
       confirmationRef.current = confirmationResult;
       setStep("code");
       setCountdown(60);
     } catch (e) {
       console.error("SMS send error:", e);
+      resetRecaptcha();
       if (e.code === "auth/too-many-requests") {
         setError("נשלחו יותר מדי בקשות. נסה שוב מאוחר יותר.");
       } else if (e.code === "auth/invalid-phone-number") {
@@ -2177,13 +2193,6 @@ const LoginScreen = ({
         setError("חרגת ממכסת ה-SMS. נסה שוב מחר.");
       } else {
         setError("שגיאה בשליחת קוד: " + (e.message || "נסה שוב"));
-      }
-      // Reset reCAPTCHA for retry
-      if (recaptchaRef.current) {
-        try {
-          recaptchaRef.current.clear();
-        } catch (ex) {}
-        recaptchaRef.current = null;
       }
     }
     setLoading(false);
@@ -2219,13 +2228,7 @@ const LoginScreen = ({
   };
   const resendCode = () => {
     if (countdown > 0) return;
-    // Reset reCAPTCHA
-    if (recaptchaRef.current) {
-      try {
-        recaptchaRef.current.clear();
-      } catch (ex) {}
-      recaptchaRef.current = null;
-    }
+    resetRecaptcha();
     setCode("");
     setStep("phone");
   };
@@ -2410,15 +2413,10 @@ const LoginScreen = ({
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      resetRecaptcha();
       setStep("phone");
       setCode("");
       setError("");
-      if (recaptchaRef.current) {
-        try {
-          recaptchaRef.current.clear();
-        } catch (ex) {}
-        recaptchaRef.current = null;
-      }
     },
     style: {
       background: "none",
