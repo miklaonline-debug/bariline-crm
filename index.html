@@ -2176,7 +2176,8 @@ const LoginScreen = ({
   const sendCode = async () => {
     // Check if phone exists in accounts
     const normalizedPhone = normalizePhoneForMatch(phone);
-    const account = accounts.find(a => a.phone === normalizedPhone);
+    const inputDigits = phone.replace(/\D/g, "").replace(/^972/, "0");
+    const account = accounts.find(a => a.phone === normalizedPhone || a.phone.replace(/\D/g, "") === inputDigits);
     if (!account) {
       setError("מספר טלפון לא נמצא במערכת");
       return;
@@ -2220,7 +2221,8 @@ const LoginScreen = ({
       await confirmationRef.current.confirm(code);
       // Auth successful — find the matching account
       const normalizedPhone = normalizePhoneForMatch(phone);
-      const account = accounts.find(a => a.phone === normalizedPhone);
+      const inputDigits = phone.replace(/\D/g, "").replace(/^972/, "0");
+      const account = accounts.find(a => a.phone === normalizedPhone || a.phone.replace(/\D/g, "") === inputDigits);
       if (account) {
         onLogin(account);
       } else {
