@@ -152,7 +152,7 @@ async function fsLoadCollection(collectionName, fromServer) {
     const snapshot = await db.collection(collectionName).get(opts);
     usageCounters.reads += snapshot.size || 1;
     if (snapshot.empty) return [];
-    return snapshot.docs.map(doc => ({
+    return snapshot.docs.map(doc => loadLocalFields(collectionName, {
       _docId: doc.id,
       ...doc.data()
     }));
@@ -165,7 +165,7 @@ async function fsLoadCollection(collectionName, fromServer) {
         });
         usageCounters.reads += cached.size || 1;
         if (cached.empty) return [];
-        return cached.docs.map(doc => ({
+        return cached.docs.map(doc => loadLocalFields(collectionName, {
           _docId: doc.id,
           ...doc.data()
         }));
@@ -175,14 +175,90 @@ async function fsLoadCollection(collectionName, fromServer) {
     return null;
   }
 }
+
+// Fields that contain large base64 data — save to localStorage instead of Firestore
+const LOCAL_STORAGE_FIELDS = ["signatureData", "measurementPhoto", "orderPdfData"];
+const PHOTO_FIELDS = ["photos"];
+function saveLocalFields(collectionName, docId, data) {
+  try {
+    // Save base64 photo fields to localStorage
+    if (data.photos && typeof data.photos === "object") {
+      const photoData = {};
+      Object.entries(data.photos).forEach(([key, val]) => {
+        if (typeof val === "string" && val.length > 200) {
+          photoData[key] = val;
+        }
+      });
+      if (Object.keys(photoData).length > 0) {
+        localStorage.setItem(`fs_photos_${collectionName}_${docId}`, JSON.stringify(photoData));
+      }
+    }
+    LOCAL_STORAGE_FIELDS.forEach(field => {
+      if (data[field] && typeof data[field] === "string" && data[field].length > 200) {
+        localStorage.setItem(`fs_${field}_${collectionName}_${docId}`, data[field]);
+      }
+    });
+  } catch (e) {
+    console.warn("localStorage save failed:", e);
+  }
+}
+function loadLocalFields(collectionName, doc) {
+  try {
+    const docId = doc.id || doc._docId;
+    if (!docId) return doc;
+    const result = {
+      ...doc
+    };
+    // Restore photos
+    const savedPhotos = localStorage.getItem(`fs_photos_${collectionName}_${docId}`);
+    if (savedPhotos) {
+      try {
+        const parsed = JSON.parse(savedPhotos);
+        result.photos = {
+          ...(result.photos || {}),
+          ...parsed
+        };
+      } catch (e) {}
+    }
+    // Restore other large fields
+    LOCAL_STORAGE_FIELDS.forEach(field => {
+      const saved = localStorage.getItem(`fs_${field}_${collectionName}_${docId}`);
+      if (saved) result[field] = saved;
+    });
+    return result;
+  } catch (e) {
+    return doc;
+  }
+}
+function stripLargeFields(data) {
+  const clean = {
+    ...data
+  };
+  delete clean._docId;
+  // Strip large base64 from photos — keep boolean flags
+  if (clean.photos && typeof clean.photos === "object") {
+    const stripped = {};
+    Object.entries(clean.photos).forEach(([key, val]) => {
+      stripped[key] = typeof val === "string" && val.length > 200 ? true : val;
+    });
+    clean.photos = stripped;
+  }
+  // Strip large base64 fields
+  LOCAL_STORAGE_FIELDS.forEach(field => {
+    if (clean[field] && typeof clean[field] === "string" && clean[field].length > 200) {
+      clean[field] = true; // Mark as exists but don't store the data
+    }
+  });
+  return clean;
+}
 async function fsSaveDocument(collectionName, docId, data) {
   const db = getDb();
   if (!db) return false;
   try {
-    const cleanData = {
-      ...data
-    };
-    delete cleanData._docId;
+    // Save large base64 fields to localStorage
+    saveLocalFields(collectionName, docId, data);
+    // Strip large fields before saving to Firestore (1MB limit)
+    const cleanData = stripLargeFields(data);
     await db.collection(collectionName).doc(String(docId)).set(cleanData);
     usageCounters.writes++;
     return true;
@@ -3850,6 +3926,8 @@ const WorkOrdersPage = ({
   const measureFileRef = useRef(null);
   const workPhotoRef = useRef(null);
   const pdfCanvasContainerRef = useRef(null);
+  const warrantyContainerRef = useRef(null);
+  const warrantySettingsRef = useRef(null);
   const [newOrder, setNewOrder] = useState({
     customerName: "",
     customerPhone: "",
@@ -4212,14 +4290,42 @@ const WorkOrdersPage = ({
       const phone = wo.customerPhone.replace(/[-\s]/g, "");
       const intlPhone = phone.startsWith("0") ? "972" + phone.slice(1) : phone;
       if (warrantyPdf && warrantyPdf.base64) {
-        // Open warranty PDF for sharing, then open WhatsApp with message
-        const pdfWindow = window.open("", "_blank");
-        if (pdfWindow) {
-          pdfWindow.document.write(`<html><head><title>אחריות - ${wo.customerName}</title></head><body style="margin:0"><embed width="100%" height="100%" src="${warrantyPdf.base64}" type="application/pdf" /></body></html>`);
+        // Try native share API first (works on mobile — can attach PDF to WhatsApp)
+        try {
+          const base64Data = warrantyPdf.base64.split(",")[1];
+          const byteChars = atob(base64Data);
+          const byteArray = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+          const blob = new Blob([byteArray], {
+            type: "application/pdf"
+          });
+          const file = new File([blob], `אחריות_${wo.customerName}_${wo.id}.pdf`, {
+            type: "application/pdf"
+          });
+          if (navigator.canShare && navigator.canShare({
+            files: [file]
+          })) {
+            navigator.share({
+              title: `תעודת אחריות — ${wo.customerName}`,
+              text: `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`,
+              files: [file]
+            }).catch(() => {});
+          } else {
+            // Fallback: download PDF then open WhatsApp with message
+            const downloadLink = document.createElement("a");
+            downloadLink.href = warrantyPdf.base64;
+            downloadLink.download = `אחריות_${wo.customerName}_${wo.id}.pdf`;
+            downloadLink.click();
+            const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
+            const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
+            setTimeout(() => window.open(waUrl, "_blank"), 800);
+          }
+        } catch (shareErr) {
+          console.warn("Share failed, falling back to WhatsApp link:", shareErr);
+          const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
+          const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
+          window.open(waUrl, "_blank");
         }
-        const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
-        const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
-        setTimeout(() => window.open(waUrl, "_blank"), 500);
       } else {
         const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nההתקנה הושלמה בהצלחה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
         const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
@@ -5999,40 +6105,75 @@ const WorkOrdersPage = ({
       setTakeJobTimeFrom("");
       setTakeJobTimeTo("");
     }
-  }, "ביטול"))), showSignature && !showSignature._warrantyAccepted && /*#__PURE__*/React.createElement(Modal, {
-    title: "תנאי אחריות — Bariline CRM",
-    onClose: () => setShowSignature(null),
-    width: 620
-  }, warrantyPdf && warrantyPdf.base64 ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "ביטול"))), showSignature && !showSignature._warrantyAccepted && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: "#fff",
+      zIndex: 10000,
+      display: "flex",
+      flexDirection: "column"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
+      justifyContent: "space-between",
       alignItems: "center",
-      gap: 8,
-      marginBottom: 10,
-      padding: 10,
-      background: colors.successLight,
-      borderRadius: 8,
-      fontSize: 13,
-      color: colors.successDark
+      padding: "10px 16px",
+      borderBottom: "1px solid #e2e8f0",
+      background: "#f8fafc",
+      flexShrink: 0
     }
-  }, Icons.check, " ", /*#__PURE__*/React.createElement("span", null, "קובץ אחריות: ", /*#__PURE__*/React.createElement("strong", null, warrantyPdf.name))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("h3", {
     style: {
-      borderRadius: 10,
-      overflow: "hidden",
-      marginBottom: 14,
-      border: `1px solid ${colors.border}`
+      margin: 0,
+      fontSize: 16,
+      fontWeight: 700
     }
-  }, /*#__PURE__*/React.createElement("embed", {
-    src: warrantyPdf.base64,
-    type: "application/pdf",
-    width: "100%",
-    height: "400px"
-  }))) : /*#__PURE__*/React.createElement("div", {
+  }, "תנאי אחריות — Bariline"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowSignature(null),
+    style: {
+      background: colors.danger,
+      color: "#fff",
+      border: "none",
+      cursor: "pointer",
+      padding: "6px 16px",
+      borderRadius: 8,
+      fontSize: 14,
+      fontWeight: 600,
+      fontFamily: "inherit"
+    }
+  }, "סגור")), warrantyPdf && warrantyPdf.base64 ? /*#__PURE__*/React.createElement("div", {
+    ref: warrantyContainerRef,
+    style: {
+      flex: 1,
+      overflow: "auto",
+      padding: isMobile ? 4 : 12,
+      background: "#e2e8f0",
+      WebkitOverflowScrolling: "touch",
+      touchAction: "pan-x pan-y pinch-zoom"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: 30,
+      color: colors.textLight
+    }
+  }, "טוען תעודת אחריות...")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 20,
       background: colors.warningLight,
       borderRadius: 10,
-      marginBottom: 14,
       textAlign: "center"
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -6047,20 +6188,17 @@ const WorkOrdersPage = ({
       fontSize: 12,
       color: "#92400e"
     }
-  }, "יש להעלות קובץ PDF של תעודת אחריות בהגדרות (לחצן ⚙ בראש הדף)")), /*#__PURE__*/React.createElement("div", {
+  }, "יש להעלות קובץ PDF של תעודת אחריות בהגדרות (לחצן ⚙ בראש הדף)"))), warrantyPdf && warrantyPdf.base64 && /*#__PURE__*/React.createElement(PdfRenderer, {
+    pdfData: warrantyPdf.base64,
+    containerRef: warrantyContainerRef
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 12,
-      background: colors.warningLight,
-      borderRadius: 8,
-      marginBottom: 12,
-      fontSize: 13,
-      color: "#92400e",
-      fontWeight: 600
-    }
-  }, Icons.warning, " הלקוח חייב לקרוא ולאשר את תנאי האחריות לפני החתימה"), /*#__PURE__*/React.createElement("div", {
-    style: {
+      borderTop: "1px solid #e2e8f0",
+      background: "#f8fafc",
       display: "flex",
-      gap: 8
+      gap: 8,
+      flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement(Button, {
     onClick: () => setShowSignature({
@@ -6251,17 +6389,25 @@ const WorkOrdersPage = ({
       fontSize: 18
     }
   }, Icons.x)), /*#__PURE__*/React.createElement("div", {
+    ref: warrantySettingsRef,
     style: {
       borderRadius: 10,
       overflow: "hidden",
-      border: `1px solid ${colors.border}`
+      border: `1px solid ${colors.border}`,
+      maxHeight: 300,
+      overflow: "auto",
+      background: "#e2e8f0"
     }
-  }, /*#__PURE__*/React.createElement("embed", {
-    src: warrantyPdf.base64,
-    type: "application/pdf",
-    width: "100%",
-    height: "300px"
-  }))) : /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: 20,
+      color: colors.textLight
+    }
+  }, "טוען תצוגה מקדימה...")), /*#__PURE__*/React.createElement(PdfRenderer, {
+    pdfData: warrantyPdf.base64,
+    containerRef: warrantySettingsRef
+  })) : /*#__PURE__*/React.createElement("div", {
     onClick: () => warrantyFileRef.current?.click(),
     style: {
       padding: "30px 20px",
@@ -9296,7 +9442,22 @@ function App() {
   const [accounts, setAccountsState] = useState(ACCOUNTS_DATA);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [warrantyPdf, setWarrantyPdf] = useState(null);
+  const [warrantyPdf, setWarrantyPdfState] = useState(() => {
+    try {
+      const saved = localStorage.getItem("bariline_warrantyPdf");
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const setWarrantyPdf = useCallback(val => {
+    setWarrantyPdfState(val);
+    try {
+      if (val) localStorage.setItem("bariline_warrantyPdf", JSON.stringify(val));else localStorage.removeItem("bariline_warrantyPdf");
+    } catch (e) {
+      console.warn("Failed to save warranty PDF to localStorage:", e);
+    }
+  }, []);
   const [serviceCalls, setServiceCallsState] = useState(SERVICE_CALLS_DATA);
   const [dbReady, setDbReady] = useState(false);
   const [dbStatus, setDbStatus] = useState("loading"); // loading | online | offline
@@ -9426,7 +9587,7 @@ function App() {
 
   // ─── Auto-refresh every 30 minutes (without logout) ────
   useEffect(() => {
-    const REFRESH_INTERVAL = 30 * 1000; // 30 seconds
+    const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
     const refreshTimer = setInterval(() => {
       console.log("Auto-refreshing data from Firestore...");
       refreshFromFirestore(false);
