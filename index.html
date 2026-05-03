@@ -5581,7 +5581,7 @@ const WorkOrdersPage = ({
         marginBottom: 6,
         color: colors.textLight
       }
-    }, "תמונת מדידה"), /*#__PURE__*/React.createElement("img", {
+    }, "תמונת מדידה"), typeof selected.measurementPhoto === "string" && selected.measurementPhoto.length > 10 ? /*#__PURE__*/React.createElement("img", {
       src: selected.measurementPhoto,
       alt: "תמונת מדידה",
       style: {
@@ -5593,7 +5593,25 @@ const WorkOrdersPage = ({
         cursor: "pointer"
       },
       onClick: () => setShowImageViewer(selected.measurementPhoto)
-    }))), selected.notes && /*#__PURE__*/React.createElement("div", {
+    }) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: 16,
+        background: colors.successLight,
+        borderRadius: 10,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: colors.success,
+        marginBottom: 4
+      }
+    }, Icons.check), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        fontWeight: 600,
+        color: colors.successDark
+      }
+    }, "תמונת מדידה צולמה (שמורה במכשיר המקורי)")))), selected.notes && /*#__PURE__*/React.createElement("div", {
       style: {
         padding: 10,
         background: colors.bg,
@@ -5710,7 +5728,7 @@ const WorkOrdersPage = ({
         fontWeight: 600,
         color: colors.successDark
       }
-    }, "חתימה נאספה"), selected.signatureData && /*#__PURE__*/React.createElement("img", {
+    }, "חתימה נאספה"), selected.signatureData && typeof selected.signatureData === "string" && selected.signatureData.length > 10 && /*#__PURE__*/React.createElement("img", {
       src: selected.signatureData,
       alt: "חתימה",
       style: {
