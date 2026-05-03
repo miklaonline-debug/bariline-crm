@@ -3176,12 +3176,16 @@ const DashboardPage = ({
 
 const InstallersPage = ({
   installers,
-  workOrders
+  setInstallers,
+  workOrders,
+  role
 }) => {
   const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(null);
+  const [editInstaller, setEditInstaller] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const filterLabels = {
     all: "הכל",
     available: "זמין",
@@ -3194,6 +3198,22 @@ const InstallersPage = ({
     return ms && mf;
   });
   const installerJobs = id => workOrders.filter(w => w.installerId === id);
+  const isAdmin = role === "admin";
+  const saveEditInstaller = () => {
+    if (!editInstaller) return;
+    const updated = {
+      ...editInstaller,
+      avatar: editInstaller.name.split(" ").map(w => w[0]).join("")
+    };
+    setInstallers(prev => prev.map(i => i.id === updated.id ? updated : i));
+    setEditInstaller(null);
+    setSelected(updated);
+  };
+  const deleteInstaller = id => {
+    setInstallers(prev => prev.filter(i => i.id !== id));
+    setShowDeleteConfirm(null);
+    setSelected(null);
+  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -3215,7 +3235,7 @@ const InstallersPage = ({
       fontSize: 14,
       color: colors.textLight
     }
-  }, installers.length, " סה״כ — ", installers.filter(i => i.status === "available").length, " זמינים")), /*#__PURE__*/React.createElement(Button, null, Icons.plus, " הוסף מתקין")), /*#__PURE__*/React.createElement("div", {
+  }, installers.length, " סה״כ — ", installers.filter(i => i.status === "available").length, " זמינים"))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 10,
@@ -3319,7 +3339,7 @@ const InstallersPage = ({
       fontSize: 12,
       color: colors.textMuted
     }
-  }, "הסמכה: ", inst.certExpiry))))), selected && /*#__PURE__*/React.createElement(Modal, {
+  }, "הסמכה: ", inst.certExpiry))))), selected && !editInstaller && /*#__PURE__*/React.createElement(Modal, {
     title: `מתקין — ${selected.name}`,
     onClose: () => setSelected(null),
     width: 600
@@ -3420,7 +3440,173 @@ const InstallersPage = ({
     }
   }, j.type, " • ", j.scheduledDate)), /*#__PURE__*/React.createElement(StatusBadge, {
     status: j.status
-  })))));
+  }))), isAdmin && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 16,
+      paddingTop: 16,
+      borderTop: `1px solid ${colors.border}`
+    }
+  }, /*#__PURE__*/React.createElement(Button, {
+    onClick: () => setEditInstaller({
+      ...selected
+    })
+  }, Icons.settings, " עריכה"), /*#__PURE__*/React.createElement(Button, {
+    variant: "danger",
+    onClick: () => setShowDeleteConfirm(selected.id)
+  }, Icons.x, " מחיקה"))), editInstaller && /*#__PURE__*/React.createElement(Modal, {
+    title: `עריכת מתקין — ${editInstaller.name}`,
+    onClose: () => setEditInstaller(null),
+    width: 500
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+      gap: "0 14px"
+    }
+  }, /*#__PURE__*/React.createElement(FormField, {
+    label: "שם מלא"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editInstaller.name,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      name: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "טלפון"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...inputStyle,
+      direction: "ltr",
+      textAlign: "right"
+    },
+    value: editInstaller.phone,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      phone: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "אימייל"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...inputStyle,
+      direction: "ltr",
+      textAlign: "right"
+    },
+    value: editInstaller.email || "",
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      email: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "התמחות"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editInstaller.specialty,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      specialty: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "אזור"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editInstaller.area,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      area: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "סטטוס"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editInstaller.status,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      status: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "available"
+  }, "זמין"), /*#__PURE__*/React.createElement("option", {
+    value: "on-job"
+  }, "בעבודה"), /*#__PURE__*/React.createElement("option", {
+    value: "off-duty"
+  }, "לא בשירות"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "דירוג"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    type: "number",
+    step: "0.1",
+    min: "0",
+    max: "5",
+    value: editInstaller.rating,
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      rating: parseFloat(e.target.value) || 0
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "תאריך הסמכה"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    type: "date",
+    value: editInstaller.certExpiry || "",
+    onChange: e => setEditInstaller({
+      ...editInstaller,
+      certExpiry: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement(Button, {
+    onClick: saveEditInstaller,
+    disabled: !editInstaller.name
+  }, Icons.check, " שמור"), /*#__PURE__*/React.createElement(Button, {
+    variant: "outline",
+    onClick: () => setEditInstaller(null)
+  }, "ביטול"))), showDeleteConfirm && /*#__PURE__*/React.createElement(Modal, {
+    title: "מחיקת מתקין",
+    onClose: () => setShowDeleteConfirm(null),
+    width: 400
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 16,
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 12
+    }
+  }, Icons.warning), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 8
+    }
+  }, "האם למחוק את המתקין?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: colors.textLight,
+      marginBottom: 16
+    }
+  }, "פעולה זו לא ניתנת לביטול. כל הנתונים של המתקין יימחקו."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement(Button, {
+    variant: "danger",
+    onClick: () => deleteInstaller(showDeleteConfirm)
+  }, Icons.x, " מחק"), /*#__PURE__*/React.createElement(Button, {
+    variant: "outline",
+    onClick: () => setShowDeleteConfirm(null)
+  }, "ביטול")))));
 };
 const PhotoImportModal = ({
   onClose,
@@ -4006,6 +4192,8 @@ const WorkOrdersPage = ({
   });
   const [calInstallerFilter, setCalInstallerFilter] = useState("all");
   const [installerFilter, setInstallerFilter] = useState("all");
+  const [editOrder, setEditOrder] = useState(null);
+  const [showDeleteOrderConfirm, setShowDeleteOrderConfirm] = useState(null);
   const statuses = initialFilter ? [initialFilter] : ["all", "pending", "scheduled", "in-progress", "pre_production", "waiting_glass", "completed", "pending_reject", "rejected", "problem"];
   const statusLabels = {
     all: "הכל",
@@ -4280,15 +4468,34 @@ const WorkOrdersPage = ({
     setSelected(null);
   };
   const reportProblem = (id, note) => {
-    setWorkOrders(prev => prev.map(w => w.id === id ? {
+    setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
       ...w,
-      status: "problem",
       problemNote: note,
       problemDate: new Date().toISOString().split("T")[0]
-    } : w));
-    setSelected(null);
+    }, "problem_reported", {
+      note
+    }) : w));
+    setSelected(prev => prev ? {
+      ...prev,
+      problemNote: note,
+      problemDate: new Date().toISOString().split("T")[0]
+    } : prev);
     setShowProblemModal(null);
     setProblemNote("");
+  };
+  const saveEditOrder = () => {
+    if (!editOrder) return;
+    setWorkOrders(prev => prev.map(w => w.id === editOrder.id ? {
+      ...w,
+      ...editOrder
+    } : w));
+    setSelected(editOrder);
+    setEditOrder(null);
+  };
+  const deleteOrder = id => {
+    setWorkOrders(prev => prev.filter(w => w.id !== id));
+    setShowDeleteOrderConfirm(null);
+    setSelected(null);
   };
   const markMeasured = (id, photoData) => {
     setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
@@ -5961,7 +6168,7 @@ const WorkOrdersPage = ({
         });
         workPhotoRef.current && workPhotoRef.current.click();
       }
-    }, Icons.camera, " התחל עבודה + צלם לפני"), selected.status === "in-progress" && role === "installer" && /*#__PURE__*/React.createElement(Button, {
+    }, Icons.camera, " התחל עבודה + צלם לפני"), ["in-progress", "problem"].includes(selected.status) && role === "installer" && /*#__PURE__*/React.createElement(Button, {
       variant: "success",
       onClick: () => {
         setPendingPhotoAction({
@@ -5971,7 +6178,7 @@ const WorkOrdersPage = ({
         });
         workPhotoRef.current && workPhotoRef.current.click();
       }
-    }, Icons.camera, " סיים עבודה + צלם אחרי"), selected.status === "in-progress" && role === "installer" && /*#__PURE__*/React.createElement(Button, {
+    }, Icons.camera, " סיים עבודה + צלם אחרי"), ["in-progress", "problem"].includes(selected.status) && role === "installer" && /*#__PURE__*/React.createElement(Button, {
       variant: "outline",
       onClick: () => setShowProblemModal(selected.id),
       style: {
@@ -5994,7 +6201,19 @@ const WorkOrdersPage = ({
           status: "cancelled"
         });
       }
-    }, "ביטול (לקוח ביטל)")));
+    }, "ביטול (לקוח ביטל)"), role === "admin" && /*#__PURE__*/React.createElement(Button, {
+      variant: "outline",
+      onClick: () => setEditOrder({
+        ...selected
+      })
+    }, Icons.settings, " עריכה"), role === "admin" && /*#__PURE__*/React.createElement(Button, {
+      variant: "outline",
+      onClick: () => setShowDeleteOrderConfirm(selected.id),
+      style: {
+        color: colors.danger,
+        borderColor: colors.danger
+      }
+    }, Icons.x, " מחיקה")));
   })(), showRejectModal && /*#__PURE__*/React.createElement(Modal, {
     title: "לא ניתן לבצע עבודה",
     onClose: () => {
@@ -6111,7 +6330,221 @@ const WorkOrdersPage = ({
       setShowProblemModal(null);
       setProblemNote("");
     }
-  }, "ביטול"))), showTakeJobModal && /*#__PURE__*/React.createElement(Modal, {
+  }, "ביטול"))), editOrder && /*#__PURE__*/React.createElement(Modal, {
+    title: `עריכת הזמנה ${editOrder.id}`,
+    onClose: () => setEditOrder(null),
+    width: 560
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+      gap: "0 14px"
+    }
+  }, /*#__PURE__*/React.createElement(FormField, {
+    label: "שם לקוח"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editOrder.customerName,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      customerName: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "טלפון לקוח"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...inputStyle,
+      direction: "ltr",
+      textAlign: "right"
+    },
+    value: editOrder.customerPhone || "",
+    onChange: e => setEditOrder({
+      ...editOrder,
+      customerPhone: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "סוג"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editOrder.type,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      type: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", null, "התקנה"), /*#__PURE__*/React.createElement("option", null, "קריאת שירות"), /*#__PURE__*/React.createElement("option", null, "מדידה"), /*#__PURE__*/React.createElement("option", null, "תיקון אחריות"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "סוג מוצר"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editOrder.productType,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      productType: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "standard"
+  }, "סטנדרט"), /*#__PURE__*/React.createElement("option", {
+    value: "custom"
+  }, "צירים נקיים"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "מוצר"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editOrder.product,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      product: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "שיבוץ מתקין"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editOrder.installerId || "",
+    onChange: e => {
+      const inst = installers.find(i => i.id === Number(e.target.value));
+      setEditOrder({
+        ...editOrder,
+        installerId: inst ? inst.id : null,
+        installerName: inst ? inst.name : null
+      });
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— לא שובץ —"), installers.map(i => /*#__PURE__*/React.createElement("option", {
+    key: i.id,
+    value: i.id
+  }, i.name)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: "1 / -1"
+    }
+  }, /*#__PURE__*/React.createElement(FormField, {
+    label: "כתובת"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editOrder.address || "",
+    onChange: e => setEditOrder({
+      ...editOrder,
+      address: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement(FormField, {
+    label: "תאריך מתוזמן"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    type: "date",
+    value: editOrder.scheduledDate || "",
+    onChange: e => setEditOrder({
+      ...editOrder,
+      scheduledDate: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(FormField, {
+    label: "סטטוס"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editOrder.status,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      status: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "pending"
+  }, "ממתין"), /*#__PURE__*/React.createElement("option", {
+    value: "scheduled"
+  }, "מתוזמן"), /*#__PURE__*/React.createElement("option", {
+    value: "in-progress"
+  }, "בביצוע"), /*#__PURE__*/React.createElement("option", {
+    value: "problem"
+  }, "בעיה"), /*#__PURE__*/React.createElement("option", {
+    value: "completed"
+  }, "הושלם"), /*#__PURE__*/React.createElement("option", {
+    value: "cancelled"
+  }, "בוטל"), /*#__PURE__*/React.createElement("option", {
+    value: "rejected"
+  }, "נדחה"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "עדיפות"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: editOrder.priority,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      priority: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "normal"
+  }, "רגיל"), /*#__PURE__*/React.createElement("option", {
+    value: "high"
+  }, "גבוה"), /*#__PURE__*/React.createElement("option", {
+    value: "urgent"
+  }, "דחוף"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "סכום (₪)"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    type: "number",
+    value: editOrder.amount,
+    onChange: e => setEditOrder({
+      ...editOrder,
+      amount: Number(e.target.value) || 0
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      gridColumn: "1 / -1"
+    }
+  }, /*#__PURE__*/React.createElement(FormField, {
+    label: "הערות"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: inputStyle,
+    value: editOrder.notes || "",
+    onChange: e => setEditOrder({
+      ...editOrder,
+      notes: e.target.value
+    })
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement(Button, {
+    onClick: saveEditOrder
+  }, Icons.check, " שמור שינויים"), /*#__PURE__*/React.createElement(Button, {
+    variant: "outline",
+    onClick: () => setEditOrder(null)
+  }, "ביטול"))), showDeleteOrderConfirm && /*#__PURE__*/React.createElement(Modal, {
+    title: "מחיקת הזמנת עבודה",
+    onClose: () => setShowDeleteOrderConfirm(null),
+    width: 400
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 16,
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 12
+    }
+  }, Icons.warning), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 8
+    }
+  }, "האם למחוק את ההזמנה?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: colors.textLight,
+      marginBottom: 16
+    }
+  }, "פעולה זו לא ניתנת לביטול. כל הנתונים של ההזמנה יימחקו."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement(Button, {
+    variant: "danger",
+    onClick: () => deleteOrder(showDeleteOrderConfirm)
+  }, Icons.x, " מחק"), /*#__PURE__*/React.createElement(Button, {
+    variant: "outline",
+    onClick: () => setShowDeleteOrderConfirm(null)
+  }, "ביטול")))), showTakeJobModal && /*#__PURE__*/React.createElement(Modal, {
     title: "קח עבודה — בחר תאריך ושעה",
     onClose: () => {
       setShowTakeJobModal(null);
@@ -9785,7 +10218,9 @@ function App() {
       case "installers":
         return /*#__PURE__*/React.createElement(InstallersPage, {
           installers: installers,
-          workOrders: workOrders
+          setInstallers: setInstallers,
+          workOrders: workOrders,
+          role: currentUser.role
         });
       case "orders":
         return /*#__PURE__*/React.createElement(WorkOrdersPage, {
