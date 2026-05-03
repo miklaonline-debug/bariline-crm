@@ -9176,13 +9176,20 @@ function App() {
   const [usageAlert, setUsageAlert] = useState(null);
   const usageIntervalRef = useRef(null);
 
-  // ─── Firestore sync wrappers ────
+  // ─── Firestore sync wrappers (save changes + delete removed items) ────
   const setWorkOrders = useCallback(updater => {
     setWorkOrdersState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      // Persist changed items to Firestore
       if (Array.isArray(next)) {
+        const nextIds = new Set(next.map(wo => String(wo.id)));
+        // Save all current items
         next.forEach(wo => fsSaveDocument(COLLECTIONS.workOrders, wo.id, wo));
+        // Delete removed items
+        if (Array.isArray(prev)) {
+          prev.forEach(wo => {
+            if (!nextIds.has(String(wo.id))) fsDeleteDocument(COLLECTIONS.workOrders, wo.id);
+          });
+        }
       }
       return next;
     });
@@ -9191,7 +9198,15 @@ function App() {
     setAccountsState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (Array.isArray(next)) {
+        const nextIds = new Set(next.map(acc => String(acc.id)));
+        // Save all current items
         next.forEach(acc => fsSaveDocument(COLLECTIONS.accounts, acc.id, acc));
+        // Delete removed items
+        if (Array.isArray(prev)) {
+          prev.forEach(acc => {
+            if (!nextIds.has(String(acc.id))) fsDeleteDocument(COLLECTIONS.accounts, acc.id);
+          });
+        }
       }
       return next;
     });
@@ -9200,7 +9215,15 @@ function App() {
     setServiceCallsState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       if (Array.isArray(next)) {
+        const nextIds = new Set(next.map(sc => String(sc.id)));
+        // Save all current items
         next.forEach(sc => fsSaveDocument(COLLECTIONS.serviceCalls, sc.id, sc));
+        // Delete removed items
+        if (Array.isArray(prev)) {
+          prev.forEach(sc => {
+            if (!nextIds.has(String(sc.id))) fsDeleteDocument(COLLECTIONS.serviceCalls, sc.id);
+          });
+        }
       }
       return next;
     });
