@@ -52,10 +52,6 @@ var cdns = [
    'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js']
 ];
 var pdfUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-var firebaseUrls = [
-  'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-  'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
-];
 
 async function loadReact() {
   for (var i = 0; i < cdns.length; i++) {
@@ -77,10 +73,6 @@ loadReact().then(async function(ok) {
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
-  // Load Firebase
-  for (var fi = 0; fi < firebaseUrls.length; fi++) {
-    try { await loadScript(firebaseUrls[fi]); } catch(e) { console.warn('Firebase script failed:', e); }
-  }
   initApp();
 });
 
@@ -101,6 +93,8 @@ const {
 const ACCOUNTS_DATA = [{
   id: 1,
   phone: "054-555-1234",
+  username: "david",
+  password: "1234",
   name: "דוד כהן",
   role: "installer",
   installerId: 1,
@@ -110,6 +104,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 2,
   phone: "052-555-5678",
+  username: "moshe",
+  password: "1234",
   name: "משה לוי",
   role: "installer",
   installerId: 2,
@@ -119,6 +115,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 3,
   phone: "050-555-9012",
+  username: "yossi",
+  password: "1234",
   name: "יוסי פרץ",
   role: "installer",
   installerId: 3,
@@ -128,6 +126,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 4,
   phone: "053-555-3456",
+  username: "amit",
+  password: "1234",
   name: "עמית שפירא",
   role: "installer",
   installerId: 4,
@@ -137,6 +137,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 5,
   phone: "054-555-7890",
+  username: "eli",
+  password: "1234",
   name: "אלי כץ",
   role: "installer",
   installerId: 5,
@@ -146,6 +148,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 6,
   phone: "052-555-2345",
+  username: "ron",
+  password: "1234",
   name: "רון אזולאי",
   role: "installer",
   installerId: 6,
@@ -155,6 +159,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 7,
   phone: "050-4941658",
+  username: "koral",
+  password: "1234",
   name: "קורל שקוי",
   role: "admin",
   installerId: null,
@@ -164,6 +170,8 @@ const ACCOUNTS_DATA = [{
 }, {
   id: 8,
   phone: "050-000-0002",
+  username: "yael",
+  password: "1234",
   name: "יעל אברהם",
   role: "admin",
   installerId: null,
@@ -2088,16 +2096,6 @@ const SignaturePad = ({
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Firebase config
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAXl5mtwMWkUkKqH6gdeYx-2SOcR58l5fk",
-  authDomain: "bariline-crm.firebaseapp.com",
-  projectId: "bariline-crm",
-  storageBucket: "bariline-crm.firebasestorage.app",
-  messagingSenderId: "1042161550667",
-  appId: "1:1042161550667:web:61a07d439a34c4705b94ce"
-};
-
 // Helper: normalize phone to match accounts (050-4941658 format)
 const normalizePhoneForMatch = phone => {
   const digits = phone.replace(/\D/g, "");
@@ -2107,144 +2105,51 @@ const normalizePhoneForMatch = phone => {
   if (local.length === 10) return local.slice(0, 3) + "-" + local.slice(3);
   return phone;
 };
-
-// Helper: convert local Israeli phone to E.164
-const phoneToE164 = phone => {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.startsWith("972")) return "+" + digits;
-  if (digits.startsWith("0")) return "+972" + digits.slice(1);
-  return "+972" + digits;
-};
 const LoginScreen = ({
   accounts,
   onLogin
 }) => {
-  const [step, setStep] = useState("phone"); // phone | code
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
+  const [identifier, setIdentifier] = useState(""); // phone or username
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const recaptchaRef = useRef(null);
-  const confirmationRef = useRef(null);
-  const firebaseInitRef = useRef(false);
-  const recaptchaWidgetId = useRef(null);
-  useEffect(() => {
-    if (countdown > 0) {
-      const t = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(t);
+  const [showPassword, setShowPassword] = useState(false);
+  const handleLogin = () => {
+    if (!identifier.trim() || !password.trim()) {
+      setError("יש למלא את כל השדות");
+      return;
     }
-  }, [countdown]);
 
-  // Initialize Firebase on mount
-  useEffect(() => {
-    if (firebaseInitRef.current) return;
-    try {
-      if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length === 0) {
-        firebase.initializeApp(FIREBASE_CONFIG);
-      }
-      firebaseInitRef.current = true;
-    } catch (e) {
-      console.error("Firebase init error:", e);
+    // Try to match by username or phone
+    const input = identifier.trim();
+    const inputDigits = input.replace(/\D/g, "").replace(/^972/, "0");
+    const isPhoneInput = /^[\d\-+()  ]+$/.test(input) && inputDigits.length >= 9;
+    let account = null;
+    if (isPhoneInput) {
+      // Match by phone — digits-only comparison
+      account = accounts.find(a => a.phone.replace(/\D/g, "") === inputDigits);
     }
-  }, []);
-  const resetRecaptcha = () => {
-    // Clear existing reCAPTCHA completely
-    if (recaptchaRef.current) {
-      try {
-        recaptchaRef.current.clear();
-      } catch (ex) {}
-      recaptchaRef.current = null;
-    }
-    // Also clear the DOM container to prevent "already rendered" error
-    const container = document.getElementById("recaptcha-container");
-    if (container) {
-      container.innerHTML = "";
-    }
-    recaptchaWidgetId.current = null;
-  };
-  const getRecaptchaVerifier = () => {
-    // Always reset before creating new one
-    resetRecaptcha();
-    const verifier = new firebase.auth.RecaptchaVerifier("recaptcha-container", {
-      size: "invisible",
-      callback: () => {}
-    });
-    recaptchaRef.current = verifier;
-    return verifier;
-  };
-  const sendCode = async () => {
-    // Check if phone exists in accounts
-    const normalizedPhone = normalizePhoneForMatch(phone);
-    const inputDigits = phone.replace(/\D/g, "").replace(/^972/, "0");
-    const account = accounts.find(a => a.phone === normalizedPhone || a.phone.replace(/\D/g, "") === inputDigits);
     if (!account) {
-      setError("מספר טלפון לא נמצא במערכת");
+      // Match by username (case-insensitive)
+      account = accounts.find(a => a.username && a.username.toLowerCase() === input.toLowerCase());
+    }
+    if (!account && isPhoneInput) {
+      // Also try normalized phone match
+      const normalizedPhone = normalizePhoneForMatch(input);
+      account = accounts.find(a => a.phone === normalizedPhone);
+    }
+    if (!account) {
+      setError("שם משתמש או מספר טלפון לא נמצא במערכת");
       return;
     }
     if (!account.active) {
       setError("החשבון אינו פעיל. פנה למנהל המערכת.");
       return;
     }
-    setError("");
-    setLoading(true);
-    try {
-      const verifier = getRecaptchaVerifier();
-      const e164 = phoneToE164(phone);
-      const confirmationResult = await firebase.auth().signInWithPhoneNumber(e164, verifier);
-      confirmationRef.current = confirmationResult;
-      setStep("code");
-      setCountdown(60);
-    } catch (e) {
-      console.error("SMS send error:", e);
-      resetRecaptcha();
-      if (e.code === "auth/too-many-requests") {
-        setError("נשלחו יותר מדי בקשות. נסה שוב מאוחר יותר.");
-      } else if (e.code === "auth/invalid-phone-number") {
-        setError("מספר טלפון לא תקין");
-      } else if (e.code === "auth/quota-exceeded") {
-        setError("חרגת ממכסת ה-SMS. נסה שוב מחר.");
-      } else {
-        setError("שגיאה בשליחת קוד: " + (e.message || "נסה שוב"));
-      }
-    }
-    setLoading(false);
-  };
-  const verifyCode = async () => {
-    if (code.length < 6) {
-      setError("יש להזין קוד בן 6 ספרות");
+    if (password !== account.password) {
+      setError("סיסמה שגויה");
       return;
     }
-    setError("");
-    setLoading(true);
-    try {
-      await confirmationRef.current.confirm(code);
-      // Auth successful — find the matching account
-      const normalizedPhone = normalizePhoneForMatch(phone);
-      const inputDigits = phone.replace(/\D/g, "").replace(/^972/, "0");
-      const account = accounts.find(a => a.phone === normalizedPhone || a.phone.replace(/\D/g, "") === inputDigits);
-      if (account) {
-        onLogin(account);
-      } else {
-        setError("האימות הצליח אך המספר לא נמצא במערכת");
-      }
-    } catch (e) {
-      console.error("Code verify error:", e);
-      if (e.code === "auth/invalid-verification-code") {
-        setError("קוד אימות שגוי. נסה שוב.");
-      } else if (e.code === "auth/code-expired") {
-        setError("הקוד פג תוקף. בקש קוד חדש.");
-      } else {
-        setError("שגיאה באימות: " + (e.message || "נסה שוב"));
-      }
-    }
-    setLoading(false);
-  };
-  const resendCode = () => {
-    if (countdown > 0) return;
-    resetRecaptcha();
-    setCode("");
-    setStep("phone");
+    onLogin(account);
   };
   return /*#__PURE__*/React.createElement("div", {
     dir: "rtl",
@@ -2308,7 +2213,7 @@ const LoginScreen = ({
     style: {
       padding: "28px 24px"
     }
-  }, step === "phone" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", {
+  }, /*#__PURE__*/React.createElement("h2", {
     style: {
       margin: "0 0 4px",
       fontSize: 18,
@@ -2321,27 +2226,26 @@ const LoginScreen = ({
       fontSize: 13,
       color: colors.textLight
     }
-  }, "הזינו את מספר הטלפון שלכם לקבלת קוד אימות ב-SMS"), /*#__PURE__*/React.createElement(FormField, {
-    label: "מספר טלפון"
+  }, "הזינו שם משתמש או מספר טלפון וסיסמה"), /*#__PURE__*/React.createElement(FormField, {
+    label: "שם משתמש או מספר טלפון"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "relative"
     }
   }, /*#__PURE__*/React.createElement("input", {
-    value: phone,
+    value: identifier,
     onChange: e => {
-      setPhone(e.target.value);
+      setIdentifier(e.target.value);
       setError("");
     },
-    placeholder: "050-4941658",
+    placeholder: "שם משתמש או טלפון",
     style: {
       ...inputStyle,
       padding: "12px 40px 12px 12px",
       fontSize: 16,
-      direction: "ltr",
       textAlign: "right"
     },
-    onKeyDown: e => e.key === "Enter" && !loading && sendCode()
+    onKeyDown: e => e.key === "Enter" && handleLogin()
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
@@ -2350,110 +2254,118 @@ const LoginScreen = ({
       transform: "translateY(-50%)",
       color: colors.textMuted
     }
-  }, Icons.phone))), error && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "18",
+    height: "18",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    viewBox: "0 0 24 24"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "12",
+    cy: "7",
+    r: "4"
+  }))))), /*#__PURE__*/React.createElement(FormField, {
+    label: "סיסמה"
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "8px 12px",
-      background: colors.dangerLight,
-      borderRadius: 8,
-      fontSize: 13,
-      color: colors.danger,
-      marginBottom: 14
+      position: "relative"
     }
-  }, error), /*#__PURE__*/React.createElement(Button, {
-    size: "lg",
-    onClick: sendCode,
-    style: {
-      width: "100%",
-      justifyContent: "center",
-      borderRadius: 10
-    },
-    disabled: !phone || loading
-  }, loading ? "שולח..." : "שלח קוד אימות")), step === "code" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("h2", {
-    style: {
-      margin: "0 0 4px",
-      fontSize: 18,
-      fontWeight: 700,
-      color: colors.text
-    }
-  }, "אימות קוד"), /*#__PURE__*/React.createElement("p", {
-    style: {
-      margin: "0 0 20px",
-      fontSize: 13,
-      color: colors.textLight
-    }
-  }, "קוד אימות נשלח ב-SMS ל-", phone), /*#__PURE__*/React.createElement(FormField, {
-    label: "קוד אימות (6 ספרות)"
   }, /*#__PURE__*/React.createElement("input", {
-    value: code,
+    type: showPassword ? "text" : "password",
+    value: password,
     onChange: e => {
-      setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+      setPassword(e.target.value);
       setError("");
     },
-    placeholder: "123456",
-    maxLength: 6,
+    placeholder: "הזן סיסמה",
     style: {
       ...inputStyle,
-      padding: "14px",
-      fontSize: 24,
-      textAlign: "center",
-      letterSpacing: 10,
-      direction: "ltr",
-      fontWeight: 700
+      padding: "12px 40px 12px 40px",
+      fontSize: 16,
+      textAlign: "right"
     },
-    onKeyDown: e => e.key === "Enter" && !loading && verifyCode()
-  })), error && /*#__PURE__*/React.createElement("div", {
+    onKeyDown: e => e.key === "Enter" && handleLogin()
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "8px 12px",
-      background: colors.dangerLight,
-      borderRadius: 8,
-      fontSize: 13,
-      color: colors.danger,
-      marginBottom: 14
+      position: "absolute",
+      right: 12,
+      top: "50%",
+      transform: "translateY(-50%)",
+      color: colors.textMuted
     }
-  }, error), /*#__PURE__*/React.createElement(Button, {
-    size: "lg",
-    onClick: verifyCode,
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "18",
+    height: "18",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    viewBox: "0 0 24 24"
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: "3",
+    y: "11",
+    width: "18",
+    height: "11",
+    rx: "2",
+    ry: "2"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M7 11V7a5 5 0 0 1 10 0v4"
+  }))), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowPassword(!showPassword),
     style: {
-      width: "100%",
-      justifyContent: "center",
-      borderRadius: 10
-    },
-    disabled: code.length < 6 || loading
-  }, loading ? "מאמת..." : "אימות וכניסה"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      marginTop: 14
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      resetRecaptcha();
-      setStep("phone");
-      setCode("");
-      setError("");
-    },
-    style: {
+      position: "absolute",
+      left: 12,
+      top: "50%",
+      transform: "translateY(-50%)",
       background: "none",
       border: "none",
       cursor: "pointer",
-      fontSize: 13,
-      color: colors.primary,
-      fontFamily: "inherit"
+      color: colors.textMuted,
+      padding: 0
     }
-  }, "חזרה"), /*#__PURE__*/React.createElement("button", {
-    onClick: resendCode,
-    disabled: countdown > 0,
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "18",
+    height: "18",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    viewBox: "0 0 24 24"
+  }, showPassword ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+    d: "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "1",
+    y1: "1",
+    x2: "23",
+    y2: "23"
+  })) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+    d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "12",
+    cy: "12",
+    r: "3"
+  })))))), error && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "none",
-      border: "none",
-      cursor: countdown > 0 ? "default" : "pointer",
+      padding: "8px 12px",
+      background: colors.dangerLight,
+      borderRadius: 8,
       fontSize: 13,
-      color: countdown > 0 ? colors.textMuted : colors.primary,
-      fontFamily: "inherit"
+      color: colors.danger,
+      marginBottom: 14
     }
-  }, countdown > 0 ? `שליחה חוזרת בעוד ${countdown} שניות` : "שלח קוד חדש")))), /*#__PURE__*/React.createElement("div", {
-    id: "recaptcha-container"
-  })));
+  }, error), /*#__PURE__*/React.createElement(Button, {
+    size: "lg",
+    onClick: handleLogin,
+    style: {
+      width: "100%",
+      justifyContent: "center",
+      borderRadius: 10
+    },
+    disabled: !identifier || !password
+  }, "כניסה"))));
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
