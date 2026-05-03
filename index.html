@@ -185,11 +185,11 @@ const LOCAL_STORAGE_FIELDS = ["signatureData", "measurementPhoto", "orderPdfData
 const PHOTO_FIELDS = ["photos"];
 function saveLocalFields(collectionName, docId, data) {
   try {
-    // Save base64 photo fields to localStorage
+    // Save oversized photo fields to localStorage as backup
     if (data.photos && typeof data.photos === "object") {
       const photoData = {};
       Object.entries(data.photos).forEach(([key, val]) => {
-        if (typeof val === "string" && val.length > 200) {
+        if (typeof val === "string" && val.length > MAX_FIELD_SIZE) {
           photoData[key] = val;
         }
       });
@@ -198,7 +198,7 @@ function saveLocalFields(collectionName, docId, data) {
       }
     }
     LOCAL_STORAGE_FIELDS.forEach(field => {
-      if (data[field] && typeof data[field] === "string" && data[field].length > 200) {
+      if (data[field] && typeof data[field] === "string" && data[field].length > MAX_FIELD_SIZE) {
         localStorage.setItem(`fs_${field}_${collectionName}_${docId}`, data[field]);
       }
     });
@@ -235,6 +235,30 @@ function loadLocalFields(collectionName, doc) {
   }
 }
 
+// Compress an image (base64 data URL) to fit within Firestore limits
+// Returns a promise that resolves to a compressed base64 JPEG string
+function compressImage(dataUrl, maxWidth = 800, quality = 0.55) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let w = img.width,
+        h = img.height;
+      if (w > maxWidth) {
+        h = Math.round(h * maxWidth / w);
+        w = maxWidth;
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(dataUrl); // fallback to original if compression fails
+    img.src = dataUrl;
+  });
+}
+
 // Deep-sanitize an object for Firestore: remove undefined, functions, symbols, convert special types
 function sanitizeForFirestore(obj) {
   if (obj === null || obj === undefined) return null;
@@ -250,23 +274,26 @@ function sanitizeForFirestore(obj) {
   }
   return null; // fallback — skip unsupported types
 }
+
+// Max size per field for Firestore storage (300KB base64 ≈ 225KB raw image)
+const MAX_FIELD_SIZE = 300000;
 function stripLargeFields(data) {
   const clean = {
     ...data
   };
   delete clean._docId;
-  // Strip large base64 from photos — keep boolean flags
+  // Strip only truly huge photos (uncompressed originals) — keep compressed ones
   if (clean.photos && typeof clean.photos === "object") {
     const stripped = {};
     Object.entries(clean.photos).forEach(([key, val]) => {
-      stripped[key] = typeof val === "string" && val.length > 200 ? true : val;
+      stripped[key] = typeof val === "string" && val.length > MAX_FIELD_SIZE ? true : val;
     });
     clean.photos = stripped;
   }
-  // Strip large base64 fields
+  // Strip only truly large fields — compressed ones should fit
   LOCAL_STORAGE_FIELDS.forEach(field => {
-    if (clean[field] && typeof clean[field] === "string" && clean[field].length > 200) {
-      clean[field] = true; // Mark as exists but don't store the data
+    if (clean[field] && typeof clean[field] === "string" && clean[field].length > MAX_FIELD_SIZE) {
+      clean[field] = true;
     }
   });
   return clean;
@@ -4275,14 +4302,15 @@ const WorkOrdersPage = ({
     const file = e.target.files[0];
     if (!file || !showMeasurePhoto) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
+      const compressed = await compressImage(reader.result);
       const id = showMeasurePhoto;
-      markMeasured(id, reader.result);
+      markMeasured(id, compressed);
       setSelected(prev => prev ? {
         ...prev,
         measured: true,
         measurementDate: new Date().toISOString().split("T")[0],
-        measurementPhoto: reader.result
+        measurementPhoto: compressed
       } : prev);
       setShowMeasurePhoto(null);
     };
@@ -4367,7 +4395,8 @@ const WorkOrdersPage = ({
     const file = e.target.files[0];
     if (!file || !pendingPhotoAction) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
+      const compressed = await compressImage(reader.result);
       const {
         id,
         type,
@@ -4377,7 +4406,7 @@ const WorkOrdersPage = ({
         ...w,
         photos: {
           ...w.photos,
-          [type]: reader.result
+          [type]: compressed
         },
         status: flow === "start" ? "in-progress" : w.status
       } : w));
@@ -4387,7 +4416,7 @@ const WorkOrdersPage = ({
           ...prev,
           photos: {
             ...prev.photos,
-            [type]: reader.result
+            [type]: compressed
           }
         };
         if (flow === "start") updated.status = "in-progress";
