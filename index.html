@@ -109,19 +109,23 @@ const FIREBASE_CONFIG = {
 // ─── Firestore Service Layer ────────────────────────────────────────────────
 
 let _db = null;
+let _dbReady = false;
 function getDb() {
-  if (_db) return _db;
+  if (_db && _dbReady) return _db;
   if (typeof firebase === "undefined") return null;
   if (!firebase.apps.length) {
     firebase.initializeApp(FIREBASE_CONFIG);
   }
-  _db = firebase.firestore();
-  // Enable offline persistence
-  _db.enablePersistence({
-    synchronizeTabs: true
-  }).catch(err => {
-    console.warn("Firestore persistence failed:", err.code);
-  });
+  if (!_db) {
+    _db = firebase.firestore();
+    _dbReady = true;
+    // Enable offline persistence (best-effort, won't block operations)
+    _db.enablePersistence({
+      synchronizeTabs: true
+    }).catch(err => {
+      console.warn("Firestore persistence failed:", err.code);
+    });
+  }
   return _db;
 }
 const COLLECTIONS = {
@@ -230,6 +234,22 @@ function loadLocalFields(collectionName, doc) {
     return doc;
   }
 }
+
+// Deep-sanitize an object for Firestore: remove undefined, functions, symbols, convert special types
+function sanitizeForFirestore(obj) {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj === "boolean" || typeof obj === "number" || typeof obj === "string") return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeForFirestore).filter(v => v !== undefined);
+  if (typeof obj === "object") {
+    const clean = {};
+    Object.entries(obj).forEach(([key, val]) => {
+      if (val === undefined || typeof val === "function" || typeof val === "symbol") return; // skip
+      clean[key] = sanitizeForFirestore(val);
+    });
+    return clean;
+  }
+  return null; // fallback — skip unsupported types
+}
 function stripLargeFields(data) {
   const clean = {
     ...data
@@ -258,7 +278,9 @@ async function fsSaveDocument(collectionName, docId, data) {
     // Save large base64 fields to localStorage
     saveLocalFields(collectionName, docId, data);
     // Strip large fields before saving to Firestore (1MB limit)
-    const cleanData = stripLargeFields(data);
+    const stripped = stripLargeFields(data);
+    // Deep-sanitize to remove undefined/functions that Firestore rejects
+    const cleanData = sanitizeForFirestore(stripped);
     await db.collection(collectionName).doc(String(docId)).set(cleanData);
     usageCounters.writes++;
     return true;
@@ -9427,6 +9449,10 @@ function App() {
   // ─── Firestore sync helper — saves changed items OUTSIDE setState ────
   const syncToFirestore = useCallback(async (collectionName, prev, next, idField = "id") => {
     if (!Array.isArray(next)) return;
+    if (!getDb()) {
+      console.warn("Firestore not ready, skipping save for", collectionName);
+      return;
+    }
     showSaveStatus("saving");
     const prevMap = new Map();
     if (Array.isArray(prev)) prev.forEach(item => prevMap.set(String(item[idField]), item));
@@ -9436,8 +9462,10 @@ function App() {
     for (const item of next) {
       const key = String(item[idField]);
       const prevItem = prevMap.get(key);
-      // Only save if item is new or changed
-      if (!prevItem || JSON.stringify(stripLargeFields(prevItem)) !== JSON.stringify(stripLargeFields(item))) {
+      // Only save if item is new or changed (compare sanitized versions)
+      const prevStr = prevItem ? JSON.stringify(sanitizeForFirestore(stripLargeFields(prevItem))) : null;
+      const nextStr = JSON.stringify(sanitizeForFirestore(stripLargeFields(item)));
+      if (!prevStr || prevStr !== nextStr) {
         const ok = await fsSaveDocument(collectionName, item[idField], item);
         if (!ok) allOk = false;
       }
