@@ -7621,7 +7621,8 @@ const ReportsPage = ({
 const AccountsPage = ({
   accounts,
   setAccounts,
-  installers
+  installers,
+  setInstallers
 }) => {
   const isMobile = useIsMobile();
   const [search, setSearch] = useState("");
@@ -7639,7 +7640,9 @@ const AccountsPage = ({
     username: "",
     password: "",
     role: "installer",
-    installerId: ""
+    installerId: "",
+    specialty: "מקלחונים",
+    area: "מרכז"
   });
   const filtered = accounts.filter(a => {
     const ms = a.name.includes(search) || a.phone.includes(search) || a.username && a.username.includes(search.toLowerCase());
@@ -7647,6 +7650,26 @@ const AccountsPage = ({
     return ms && mr;
   });
   const createAccount = () => {
+    let installerId = newAcc.role === "installer" ? Number(newAcc.installerId) || null : null;
+    // Auto-create installer entry if role is installer
+    if (newAcc.role === "installer") {
+      if (!installerId) {
+        const newInstId = Math.max(...installers.map(i => i.id), 0) + 1;
+        const newInstaller = {
+          id: newInstId,
+          name: newAcc.name,
+          phone: newAcc.phone,
+          specialty: newAcc.specialty || "מקלחונים",
+          area: newAcc.area || "מרכז",
+          rating: 5.0,
+          completedJobs: 0,
+          status: "available",
+          avatar: newAcc.name.split(" ").map(n => n[0]).join("")
+        };
+        setInstallers([...installers, newInstaller]);
+        installerId = newInstId;
+      }
+    }
     const acc = {
       id: Math.max(...accounts.map(a => a.id), 0) + 1,
       phone: newAcc.phone,
@@ -7654,7 +7677,7 @@ const AccountsPage = ({
       password: newAcc.password || "1234",
       name: newAcc.name,
       role: newAcc.role,
-      installerId: newAcc.role === "installer" ? Number(newAcc.installerId) || null : null,
+      installerId: installerId,
       active: true,
       lastLogin: "—",
       createdAt: new Date().toISOString().slice(0, 10)
@@ -7667,7 +7690,9 @@ const AccountsPage = ({
       username: "",
       password: "",
       role: "installer",
-      installerId: ""
+      installerId: "",
+      specialty: "מקלחונים",
+      area: "מרכז"
     });
   };
   const toggleActive = id => {
@@ -7677,6 +7702,10 @@ const AccountsPage = ({
     } : a));
   };
   const deleteAccount = id => {
+    const acc = accounts.find(a => a.id === id);
+    if (acc && acc.role === "installer" && acc.installerId) {
+      setInstallers(installers.filter(i => i.id !== acc.installerId));
+    }
     setAccounts(accounts.filter(a => a.id !== id));
   };
   const savePassword = () => {
@@ -7949,8 +7978,8 @@ const AccountsPage = ({
     value: "installer"
   }, "מתקין"), /*#__PURE__*/React.createElement("option", {
     value: "admin"
-  }, "מנהל"))), newAcc.role === "installer" && /*#__PURE__*/React.createElement(FormField, {
-    label: "שיוך למתקין"
+  }, "מנהל"))), newAcc.role === "installer" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(FormField, {
+    label: "שיוך למתקין קיים (אופציונלי)"
   }, /*#__PURE__*/React.createElement("select", {
     style: inputStyle,
     value: newAcc.installerId,
@@ -7960,10 +7989,46 @@ const AccountsPage = ({
     })
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "— בחר מתקין —"), installers.map(i => /*#__PURE__*/React.createElement("option", {
+  }, "— צור מתקין חדש —"), installers.map(i => /*#__PURE__*/React.createElement("option", {
     key: i.id,
     value: i.id
-  }, i.name)))), /*#__PURE__*/React.createElement("div", {
+  }, i.name)))), !newAcc.installerId && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(FormField, {
+    label: "התמחות"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: newAcc.specialty,
+    onChange: e => setNewAcc({
+      ...newAcc,
+      specialty: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "מקלחונים"
+  }, "מקלחונים"), /*#__PURE__*/React.createElement("option", {
+    value: "חיפויי זכוכית"
+  }, "חיפויי זכוכית"), /*#__PURE__*/React.createElement("option", {
+    value: "מעקות"
+  }, "מעקות"), /*#__PURE__*/React.createElement("option", {
+    value: "מקלחונים וחיפויים"
+  }, "מקלחונים וחיפויים"))), /*#__PURE__*/React.createElement(FormField, {
+    label: "אזור"
+  }, /*#__PURE__*/React.createElement("select", {
+    style: inputStyle,
+    value: newAcc.area,
+    onChange: e => setNewAcc({
+      ...newAcc,
+      area: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "מרכז"
+  }, "מרכז"), /*#__PURE__*/React.createElement("option", {
+    value: "צפון"
+  }, "צפון"), /*#__PURE__*/React.createElement("option", {
+    value: "דרום"
+  }, "דרום"), /*#__PURE__*/React.createElement("option", {
+    value: "שפלה"
+  }, "שפלה"), /*#__PURE__*/React.createElement("option", {
+    value: "ירושלים"
+  }, "ירושלים"))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
@@ -9228,6 +9293,21 @@ function App() {
       return next;
     });
   }, []);
+  const setInstallers = useCallback(updater => {
+    setInstallersState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (Array.isArray(next)) {
+        const nextIds = new Set(next.map(inst => String(inst.id)));
+        next.forEach(inst => fsSaveDocument(COLLECTIONS.installers, inst.id, inst));
+        if (Array.isArray(prev)) {
+          prev.forEach(inst => {
+            if (!nextIds.has(String(inst.id))) fsDeleteDocument(COLLECTIONS.installers, inst.id);
+          });
+        }
+      }
+      return next;
+    });
+  }, []);
 
   // ─── Load data from Firestore on mount ────
   useEffect(() => {
@@ -9493,7 +9573,8 @@ function App() {
         return /*#__PURE__*/React.createElement(AccountsPage, {
           accounts: accounts,
           setAccounts: setAccounts,
-          installers: installers
+          installers: installers,
+          setInstallers: setInstallers
         });
       case "integration":
         return /*#__PURE__*/React.createElement(BarakIntegrationPage, {
