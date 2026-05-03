@@ -9415,73 +9415,77 @@ function App() {
   const [usageAlert, setUsageAlert] = useState(null);
   const usageIntervalRef = useRef(null);
 
-  // ─── Firestore sync wrappers (save changes + delete removed items) ────
+  // ─── Save status indicator ────
+  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
+  const saveTimerRef = useRef(null);
+  const showSaveStatus = status => {
+    setSaveStatus(status);
+    clearTimeout(saveTimerRef.current);
+    if (status === "saved") saveTimerRef.current = setTimeout(() => setSaveStatus(null), 2000);
+  };
+
+  // ─── Firestore sync helper — saves changed items OUTSIDE setState ────
+  const syncToFirestore = useCallback(async (collectionName, prev, next, idField = "id") => {
+    if (!Array.isArray(next)) return;
+    showSaveStatus("saving");
+    const prevMap = new Map();
+    if (Array.isArray(prev)) prev.forEach(item => prevMap.set(String(item[idField]), item));
+    const nextIds = new Set(next.map(item => String(item[idField])));
+    let allOk = true;
+    // Save changed/new items
+    for (const item of next) {
+      const key = String(item[idField]);
+      const prevItem = prevMap.get(key);
+      // Only save if item is new or changed
+      if (!prevItem || JSON.stringify(stripLargeFields(prevItem)) !== JSON.stringify(stripLargeFields(item))) {
+        const ok = await fsSaveDocument(collectionName, item[idField], item);
+        if (!ok) allOk = false;
+      }
+    }
+    // Delete removed items
+    if (Array.isArray(prev)) {
+      for (const item of prev) {
+        if (!nextIds.has(String(item[idField]))) {
+          await fsDeleteDocument(collectionName, item[idField]);
+        }
+      }
+    }
+    showSaveStatus(allOk ? "saved" : "error");
+  }, []);
+
+  // ─── Firestore sync wrappers ────
+  const workOrdersRef = useRef(workOrders);
+  workOrdersRef.current = workOrders;
   const setWorkOrders = useCallback(updater => {
-    setWorkOrdersState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (Array.isArray(next)) {
-        const nextIds = new Set(next.map(wo => String(wo.id)));
-        // Save all current items
-        next.forEach(wo => fsSaveDocument(COLLECTIONS.workOrders, wo.id, wo));
-        // Delete removed items
-        if (Array.isArray(prev)) {
-          prev.forEach(wo => {
-            if (!nextIds.has(String(wo.id))) fsDeleteDocument(COLLECTIONS.workOrders, wo.id);
-          });
-        }
-      }
-      return next;
-    });
-  }, []);
+    const prev = workOrdersRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    setWorkOrdersState(next);
+    syncToFirestore(COLLECTIONS.workOrders, prev, next);
+  }, [syncToFirestore]);
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
   const setAccounts = useCallback(updater => {
-    setAccountsState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (Array.isArray(next)) {
-        const nextIds = new Set(next.map(acc => String(acc.id)));
-        // Save all current items
-        next.forEach(acc => fsSaveDocument(COLLECTIONS.accounts, acc.id, acc));
-        // Delete removed items
-        if (Array.isArray(prev)) {
-          prev.forEach(acc => {
-            if (!nextIds.has(String(acc.id))) fsDeleteDocument(COLLECTIONS.accounts, acc.id);
-          });
-        }
-      }
-      return next;
-    });
-  }, []);
+    const prev = accountsRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    setAccountsState(next);
+    syncToFirestore(COLLECTIONS.accounts, prev, next);
+  }, [syncToFirestore]);
+  const serviceCallsRef = useRef(serviceCalls);
+  serviceCallsRef.current = serviceCalls;
   const setServiceCalls = useCallback(updater => {
-    setServiceCallsState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (Array.isArray(next)) {
-        const nextIds = new Set(next.map(sc => String(sc.id)));
-        // Save all current items
-        next.forEach(sc => fsSaveDocument(COLLECTIONS.serviceCalls, sc.id, sc));
-        // Delete removed items
-        if (Array.isArray(prev)) {
-          prev.forEach(sc => {
-            if (!nextIds.has(String(sc.id))) fsDeleteDocument(COLLECTIONS.serviceCalls, sc.id);
-          });
-        }
-      }
-      return next;
-    });
-  }, []);
+    const prev = serviceCallsRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    setServiceCallsState(next);
+    syncToFirestore(COLLECTIONS.serviceCalls, prev, next);
+  }, [syncToFirestore]);
+  const installersRef = useRef(installers);
+  installersRef.current = installers;
   const setInstallers = useCallback(updater => {
-    setInstallersState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      if (Array.isArray(next)) {
-        const nextIds = new Set(next.map(inst => String(inst.id)));
-        next.forEach(inst => fsSaveDocument(COLLECTIONS.installers, inst.id, inst));
-        if (Array.isArray(prev)) {
-          prev.forEach(inst => {
-            if (!nextIds.has(String(inst.id))) fsDeleteDocument(COLLECTIONS.installers, inst.id);
-          });
-        }
-      }
-      return next;
-    });
-  }, []);
+    const prev = installersRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    setInstallersState(next);
+    syncToFirestore(COLLECTIONS.installers, prev, next);
+  }, [syncToFirestore]);
 
   // ─── Load/refresh data from Firestore ────
   const refreshFromFirestore = useCallback(async isInitial => {
@@ -10049,7 +10053,25 @@ function App() {
     points: "1 20 1 14 7 14"
   }), /*#__PURE__*/React.createElement("path", {
     d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
-  })), "רענן"), /*#__PURE__*/React.createElement("span", {
+  })), "רענן"), saveStatus === "saving" && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: colors.primary,
+      fontWeight: 600
+    }
+  }, "שומר..."), saveStatus === "saved" && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: colors.successDark,
+      fontWeight: 600
+    }
+  }, "נשמר ", Icons.check), saveStatus === "error" && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: colors.danger,
+      fontWeight: 600
+    }
+  }, "שגיאה בשמירה!"), /*#__PURE__*/React.createElement("span", {
     title: dbStatus === "online" ? "מסד נתונים מחובר" : dbStatus === "offline" ? "מצב לא מקוון" : "טוען...",
     style: {
       width: 8,
