@@ -6105,75 +6105,40 @@ const WorkOrdersPage = ({
       setTakeJobTimeFrom("");
       setTakeJobTimeTo("");
     }
-  }, "ביטול"))), showSignature && !showSignature._warrantyAccepted && /*#__PURE__*/React.createElement("div", {
-    style: {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: "#fff",
-      zIndex: 10000,
-      display: "flex",
-      flexDirection: "column"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, "ביטול"))), showSignature && !showSignature._warrantyAccepted && /*#__PURE__*/React.createElement(Modal, {
+    title: "תנאי אחריות — Bariline CRM",
+    onClose: () => setShowSignature(null),
+    width: 620
+  }, warrantyPdf && warrantyPdf.base64 ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "space-between",
       alignItems: "center",
-      padding: "10px 16px",
-      borderBottom: "1px solid #e2e8f0",
-      background: "#f8fafc",
-      flexShrink: 0
-    }
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: {
-      margin: 0,
-      fontSize: 16,
-      fontWeight: 700
-    }
-  }, "תנאי אחריות — Bariline"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowSignature(null),
-    style: {
-      background: colors.danger,
-      color: "#fff",
-      border: "none",
-      cursor: "pointer",
-      padding: "6px 16px",
+      gap: 8,
+      marginBottom: 10,
+      padding: 10,
+      background: colors.successLight,
       borderRadius: 8,
-      fontSize: 14,
-      fontWeight: 600,
-      fontFamily: "inherit"
+      fontSize: 13,
+      color: colors.successDark
     }
-  }, "סגור")), warrantyPdf && warrantyPdf.base64 ? /*#__PURE__*/React.createElement("div", {
-    ref: warrantyContainerRef,
+  }, Icons.check, " ", /*#__PURE__*/React.createElement("span", null, "קובץ אחריות: ", /*#__PURE__*/React.createElement("strong", null, warrantyPdf.name))), /*#__PURE__*/React.createElement("div", {
     style: {
-      flex: 1,
-      overflow: "auto",
-      padding: isMobile ? 4 : 12,
-      background: "#e2e8f0",
-      WebkitOverflowScrolling: "touch",
-      touchAction: "pan-x pan-y pinch-zoom"
+      borderRadius: 10,
+      overflow: "hidden",
+      marginBottom: 14,
+      border: `1px solid ${colors.border}`
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      padding: 30,
-      color: colors.textLight
-    }
-  }, "טוען תעודת אחריות...")) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("embed", {
+    src: warrantyPdf.base64,
+    type: "application/pdf",
+    width: "100%",
+    height: "400px"
+  }))) : /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 20,
       background: colors.warningLight,
       borderRadius: 10,
+      marginBottom: 14,
       textAlign: "center"
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -6188,17 +6153,20 @@ const WorkOrdersPage = ({
       fontSize: 12,
       color: "#92400e"
     }
-  }, "יש להעלות קובץ PDF של תעודת אחריות בהגדרות (לחצן ⚙ בראש הדף)"))), warrantyPdf && warrantyPdf.base64 && /*#__PURE__*/React.createElement(PdfRenderer, {
-    pdfData: warrantyPdf.base64,
-    containerRef: warrantyContainerRef
-  }), /*#__PURE__*/React.createElement("div", {
+  }, "יש להעלות קובץ PDF של תעודת אחריות בהגדרות (לחצן ⚙ בראש הדף)")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 12,
-      borderTop: "1px solid #e2e8f0",
-      background: "#f8fafc",
+      background: colors.warningLight,
+      borderRadius: 8,
+      marginBottom: 12,
+      fontSize: 13,
+      color: "#92400e",
+      fontWeight: 600
+    }
+  }, Icons.warning, " הלקוח חייב לקרוא ולאשר את תנאי האחריות לפני החתימה"), /*#__PURE__*/React.createElement("div", {
+    style: {
       display: "flex",
-      gap: 8,
-      flexShrink: 0
+      gap: 8
     }
   }, /*#__PURE__*/React.createElement(Button, {
     onClick: () => setShowSignature({
@@ -6275,25 +6243,16 @@ const WorkOrdersPage = ({
       fontFamily: "inherit"
     }
   }, "סגור")), /*#__PURE__*/React.createElement("div", {
-    ref: pdfCanvasContainerRef,
     style: {
       flex: 1,
-      overflow: "auto",
-      padding: isMobile ? 4 : 12,
-      background: "#e2e8f0",
-      WebkitOverflowScrolling: "touch",
-      touchAction: "pan-x pan-y pinch-zoom"
+      overflow: "hidden"
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      padding: 30,
-      color: colors.textLight
-    }
-  }, "טוען PDF...")), /*#__PURE__*/React.createElement(PdfRenderer, {
-    pdfData: showPdfViewer,
-    containerRef: pdfCanvasContainerRef
-  })), showImageViewer && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("embed", {
+    src: showPdfViewer,
+    type: "application/pdf",
+    width: "100%",
+    height: "100%"
+  }))), showImageViewer && /*#__PURE__*/React.createElement("div", {
     onClick: () => setShowImageViewer(null),
     style: {
       position: "fixed",
@@ -6389,25 +6348,17 @@ const WorkOrdersPage = ({
       fontSize: 18
     }
   }, Icons.x)), /*#__PURE__*/React.createElement("div", {
-    ref: warrantySettingsRef,
     style: {
       borderRadius: 10,
       overflow: "hidden",
-      border: `1px solid ${colors.border}`,
-      maxHeight: 300,
-      overflow: "auto",
-      background: "#e2e8f0"
+      border: `1px solid ${colors.border}`
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      padding: 20,
-      color: colors.textLight
-    }
-  }, "טוען תצוגה מקדימה...")), /*#__PURE__*/React.createElement(PdfRenderer, {
-    pdfData: warrantyPdf.base64,
-    containerRef: warrantySettingsRef
-  })) : /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("embed", {
+    src: warrantyPdf.base64,
+    type: "application/pdf",
+    width: "100%",
+    height: "300px"
+  }))) : /*#__PURE__*/React.createElement("div", {
     onClick: () => warrantyFileRef.current?.click(),
     style: {
       padding: "30px 20px",
