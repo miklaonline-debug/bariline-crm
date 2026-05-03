@@ -9417,7 +9417,7 @@ function App() {
 
   // ─── Auto-refresh every 30 minutes (without logout) ────
   useEffect(() => {
-    const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
+    const REFRESH_INTERVAL = 30 * 1000; // 30 seconds
     const refreshTimer = setInterval(() => {
       console.log("Auto-refreshing data from Firestore...");
       refreshFromFirestore(false);
