@@ -52,6 +52,8 @@ var cdns = [
    'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js']
 ];
 var pdfUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+var firebaseAppUrl = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js';
+var firebaseFirestoreUrl = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js';
 
 async function loadReact() {
   for (var i = 0; i < cdns.length; i++) {
@@ -73,6 +75,11 @@ loadReact().then(async function(ok) {
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
+  // Load Firebase
+  try {
+    await loadScript(firebaseAppUrl);
+    await loadScript(firebaseFirestoreUrl);
+  } catch(e) { console.warn('Firebase failed to load, running in offline mode', e); }
   initApp();
 });
 
@@ -87,6 +94,148 @@ const {
   createContext,
   useContext
 } = React;
+
+// ─── Firebase Configuration ─────────────────────────────────────────────────
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAXl5mtwMWkUkKqH6gdeYx-2SOcR58l5fk",
+  authDomain: "bariline-crm.firebaseapp.com",
+  projectId: "bariline-crm",
+  storageBucket: "bariline-crm.firebasestorage.app",
+  messagingSenderId: "1042161550667",
+  appId: "1:1042161550667:web:61a07d439a34c4705b94ce"
+};
+
+// ─── Firestore Service Layer ────────────────────────────────────────────────
+
+let _db = null;
+function getDb() {
+  if (_db) return _db;
+  if (typeof firebase === "undefined") return null;
+  if (!firebase.apps.length) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+  }
+  _db = firebase.firestore();
+  // Enable offline persistence
+  _db.enablePersistence({
+    synchronizeTabs: true
+  }).catch(err => {
+    console.warn("Firestore persistence failed:", err.code);
+  });
+  return _db;
+}
+const COLLECTIONS = {
+  accounts: "accounts",
+  workOrders: "workOrders",
+  serviceCalls: "serviceCalls",
+  installers: "installers",
+  customers: "customers",
+  inventory: "inventory",
+  notifications: "notifications",
+  usageStats: "usageStats"
+};
+
+// Read/write counters for usage monitoring
+const usageCounters = {
+  reads: 0,
+  writes: 0,
+  deletes: 0,
+  sessionStart: Date.now()
+};
+async function fsLoadCollection(collectionName) {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const snapshot = await db.collection(collectionName).get();
+    usageCounters.reads += snapshot.size || 1;
+    if (snapshot.empty) return [];
+    return snapshot.docs.map(doc => ({
+      _docId: doc.id,
+      ...doc.data()
+    }));
+  } catch (err) {
+    console.error("Firestore load error:", collectionName, err);
+    return null;
+  }
+}
+async function fsSaveDocument(collectionName, docId, data) {
+  const db = getDb();
+  if (!db) return false;
+  try {
+    const cleanData = {
+      ...data
+    };
+    delete cleanData._docId;
+    await db.collection(collectionName).doc(String(docId)).set(cleanData);
+    usageCounters.writes++;
+    return true;
+  } catch (err) {
+    console.error("Firestore save error:", collectionName, docId, err);
+    return false;
+  }
+}
+async function fsDeleteDocument(collectionName, docId) {
+  const db = getDb();
+  if (!db) return false;
+  try {
+    await db.collection(collectionName).doc(String(docId)).delete();
+    usageCounters.deletes++;
+    return true;
+  } catch (err) {
+    console.error("Firestore delete error:", collectionName, docId, err);
+    return false;
+  }
+}
+async function fsSeedCollection(collectionName, items, idField = "id") {
+  const db = getDb();
+  if (!db) return;
+  const batch = db.batch();
+  items.forEach(item => {
+    const docRef = db.collection(collectionName).doc(String(item[idField]));
+    batch.set(docRef, item);
+  });
+  await batch.commit();
+  usageCounters.writes += items.length;
+}
+async function fsSaveUsageStats() {
+  const db = getDb();
+  if (!db) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const docRef = db.collection(COLLECTIONS.usageStats).doc(today);
+  try {
+    const doc = await docRef.get();
+    if (doc.exists) {
+      const existing = doc.data();
+      await docRef.update({
+        reads: (existing.reads || 0) + usageCounters.reads,
+        writes: (existing.writes || 0) + usageCounters.writes,
+        deletes: (existing.deletes || 0) + usageCounters.deletes,
+        lastUpdated: new Date().toISOString()
+      });
+    } else {
+      await docRef.set({
+        date: today,
+        reads: usageCounters.reads,
+        writes: usageCounters.writes,
+        deletes: usageCounters.deletes,
+        lastUpdated: new Date().toISOString()
+      });
+    }
+    usageCounters.reads = 0;
+    usageCounters.writes = 0;
+    usageCounters.deletes = 0;
+  } catch (err) {
+    console.warn("Usage stats save failed:", err);
+  }
+}
+
+// Spark plan limits (daily)
+const SPARK_LIMITS = {
+  reads: 50000,
+  writes: 20000,
+  deletes: 20000,
+  storageMB: 1024
+};
 
 // ─── Accounts & Auth Data ────────────────────────────────────────────────────
 
@@ -9015,22 +9164,166 @@ function App() {
   const [page, setPage] = useState("dashboard");
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
-  const [workOrders, setWorkOrders] = useState(WORK_ORDERS_DATA);
-  const [installers] = useState(INSTALLERS_DATA);
-  const [accounts, setAccounts] = useState(ACCOUNTS_DATA);
+  const [workOrders, setWorkOrdersState] = useState(WORK_ORDERS_DATA);
+  const [installers, setInstallersState] = useState(INSTALLERS_DATA);
+  const [accounts, setAccountsState] = useState(ACCOUNTS_DATA);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [warrantyPdf, setWarrantyPdf] = useState(null); // { name, base64 }
-  const [serviceCalls, setServiceCalls] = useState(SERVICE_CALLS_DATA);
+  const [warrantyPdf, setWarrantyPdf] = useState(null);
+  const [serviceCalls, setServiceCallsState] = useState(SERVICE_CALLS_DATA);
+  const [dbReady, setDbReady] = useState(false);
+  const [dbStatus, setDbStatus] = useState("loading"); // loading | online | offline
+  const [usageAlert, setUsageAlert] = useState(null);
+  const usageIntervalRef = useRef(null);
+
+  // ─── Firestore sync wrappers ────
+  const setWorkOrders = useCallback(updater => {
+    setWorkOrdersState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      // Persist changed items to Firestore
+      if (Array.isArray(next)) {
+        next.forEach(wo => fsSaveDocument(COLLECTIONS.workOrders, wo.id, wo));
+      }
+      return next;
+    });
+  }, []);
+  const setAccounts = useCallback(updater => {
+    setAccountsState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (Array.isArray(next)) {
+        next.forEach(acc => fsSaveDocument(COLLECTIONS.accounts, acc.id, acc));
+      }
+      return next;
+    });
+  }, []);
+  const setServiceCalls = useCallback(updater => {
+    setServiceCallsState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (Array.isArray(next)) {
+        next.forEach(sc => fsSaveDocument(COLLECTIONS.serviceCalls, sc.id, sc));
+      }
+      return next;
+    });
+  }, []);
+
+  // ─── Load data from Firestore on mount ────
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFromFirestore() {
+      const db = getDb();
+      if (!db) {
+        setDbStatus("offline");
+        setDbReady(true);
+        return;
+      }
+      try {
+        // Try loading each collection; seed with defaults if empty
+        const [fsAccounts, fsWorkOrders, fsServiceCalls, fsInstallers] = await Promise.all([fsLoadCollection(COLLECTIONS.accounts), fsLoadCollection(COLLECTIONS.workOrders), fsLoadCollection(COLLECTIONS.serviceCalls), fsLoadCollection(COLLECTIONS.installers)]);
+        if (cancelled) return;
+
+        // Seed empty collections with default data
+        if (fsAccounts && fsAccounts.length === 0) {
+          await fsSeedCollection(COLLECTIONS.accounts, ACCOUNTS_DATA);
+        } else if (fsAccounts && fsAccounts.length > 0) {
+          setAccountsState(fsAccounts);
+        }
+        if (fsWorkOrders && fsWorkOrders.length === 0) {
+          await fsSeedCollection(COLLECTIONS.workOrders, WORK_ORDERS_DATA);
+        } else if (fsWorkOrders && fsWorkOrders.length > 0) {
+          setWorkOrdersState(fsWorkOrders);
+        }
+        if (fsServiceCalls && fsServiceCalls.length === 0) {
+          await fsSeedCollection(COLLECTIONS.serviceCalls, SERVICE_CALLS_DATA);
+        } else if (fsServiceCalls && fsServiceCalls.length > 0) {
+          setServiceCallsState(fsServiceCalls);
+        }
+        if (fsInstallers && fsInstallers.length === 0) {
+          await fsSeedCollection(COLLECTIONS.installers, INSTALLERS_DATA);
+        } else if (fsInstallers && fsInstallers.length > 0) {
+          setInstallersState(fsInstallers);
+        }
+
+        // Also seed customers, inventory, notifications if empty
+        const [fsCust, fsInv] = await Promise.all([fsLoadCollection(COLLECTIONS.customers), fsLoadCollection(COLLECTIONS.inventory)]);
+        if (fsCust && fsCust.length === 0) await fsSeedCollection(COLLECTIONS.customers, CUSTOMERS_DATA);
+        if (fsInv && fsInv.length === 0) await fsSeedCollection(COLLECTIONS.inventory, INVENTORY_DATA);
+        setDbStatus("online");
+      } catch (err) {
+        console.error("Firestore init error:", err);
+        setDbStatus("offline");
+      }
+      setDbReady(true);
+    }
+    loadFromFirestore();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ─── Periodic usage stats save & limit check ────
+  useEffect(() => {
+    usageIntervalRef.current = setInterval(() => {
+      fsSaveUsageStats();
+      // Check if approaching limits (warn at 80%)
+      const totalReads = usageCounters.reads;
+      const totalWrites = usageCounters.writes;
+      if (totalReads > SPARK_LIMITS.reads * 0.8 || totalWrites > SPARK_LIMITS.writes * 0.8) {
+        setUsageAlert({
+          reads: totalReads,
+          writes: totalWrites,
+          readPct: Math.round(totalReads / SPARK_LIMITS.reads * 100),
+          writePct: Math.round(totalWrites / SPARK_LIMITS.writes * 100)
+        });
+      }
+    }, 60000); // Check every minute
+    return () => clearInterval(usageIntervalRef.current);
+  }, []);
+
+  // Save usage stats on page unload
+  useEffect(() => {
+    const handleUnload = () => fsSaveUsageStats();
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, []);
   const unreadCount = notifications.filter(n => !n.read).length;
   const handleLogin = account => {
     setCurrentUser(account);
     setPage(account.role === "admin" ? "dashboard" : "orders");
   };
   const handleLogout = () => {
+    fsSaveUsageStats();
     setCurrentUser(null);
     setPage("dashboard");
   };
+  if (!dbReady) {
+    return /*#__PURE__*/React.createElement("div", {
+      dir: "rtl",
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        fontFamily: "'Segoe UI', Arial, sans-serif",
+        background: "#f8fafc",
+        gap: 16
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 40,
+        height: 40,
+        border: "3px solid #e2e8f0",
+        borderTopColor: "#3b82f6",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 16,
+        color: "#64748b"
+      }
+    }, "טוען נתונים..."));
+  }
   if (!currentUser) {
     return /*#__PURE__*/React.createElement(LoginScreen, {
       accounts: accounts,
@@ -9422,6 +9715,45 @@ function App() {
       position: "relative"
     }
   }, /*#__PURE__*/React.createElement("span", {
+    title: dbStatus === "online" ? "מסד נתונים מחובר" : dbStatus === "offline" ? "מצב לא מקוון" : "טוען...",
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: dbStatus === "online" ? "#10b981" : dbStatus === "offline" ? "#f59e0b" : "#94a3b8",
+      flexShrink: 0
+    }
+  }), usageAlert && isAdmin && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: 12,
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: 9999,
+      background: "#fef3c7",
+      border: "1px solid #f59e0b",
+      borderRadius: 10,
+      padding: "10px 18px",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      boxShadow: "0 4px 20px rgba(0,0,0,0.1)"
+    }
+  }, Icons.warning, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: "#92400e"
+    }
+  }, "שימוש גבוה: קריאות ", usageAlert.readPct, "% | כתיבות ", usageAlert.writePct, "%"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setUsageAlert(null),
+    style: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
+      color: "#92400e",
+      padding: 2
+    }
+  }, Icons.x)), /*#__PURE__*/React.createElement("span", {
     style: {
       padding: "4px 10px",
       borderRadius: 6,
