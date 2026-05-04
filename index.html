@@ -181,7 +181,7 @@ async function fsLoadCollection(collectionName, fromServer) {
 }
 
 // Fields that contain large base64 data — save to localStorage instead of Firestore
-const LOCAL_STORAGE_FIELDS = ["signatureData", "measurementPhoto", "orderPdfData"];
+const LOCAL_STORAGE_FIELDS = ["measurementPhoto", "orderPdfData"];
 const PHOTO_FIELDS = ["photos"];
 function saveLocalFields(collectionName, docId, data) {
   try {
@@ -2373,7 +2373,11 @@ const SignaturePad = ({
   }, /*#__PURE__*/React.createElement(Button, {
     variant: "success",
     disabled: !hasSignature,
-    onClick: () => onSave(canvasRef.current.toDataURL())
+    onClick: async () => {
+      const raw = canvasRef.current.toDataURL();
+      const compressed = await compressImage(raw, 460, 0.6);
+      onSave(compressed);
+    }
   }, "אישור חתימה"), onCancel && /*#__PURE__*/React.createElement(Button, {
     variant: "ghost",
     onClick: onCancel
@@ -4532,12 +4536,13 @@ const WorkOrdersPage = ({
       glassReadyMatched: false
     }, "glass_ready") : w));
   };
-  const handleSignature = (id, dataUrl) => {
+  const handleSignature = async (id, dataUrl) => {
+    const compressed = await compressImage(dataUrl, 460, 0.6);
     const wo = workOrders.find(w => w.id === id);
     setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
       ...w,
       signed: true,
-      signatureData: dataUrl,
+      signatureData: compressed,
       status: "completed",
       completedDate: new Date().toISOString().split("T")[0]
     }, "completed") : w));
