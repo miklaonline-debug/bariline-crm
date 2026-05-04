@@ -261,6 +261,25 @@ function compressImage(dataUrl, maxWidth = 800, quality = 0.55) {
   });
 }
 
+// Process signature image to ensure white background (fixes transparent/black background issue)
+function processSignatureWhiteBg(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 // Create a signed warranty PDF by stamping the customer's signature onto the warranty PDF
 // Exact field positions from the Bariline warranty template:
 //   "תאריך:_________"  → x: 378.8–505.5, pdf-y: 366.6–378.9
@@ -279,11 +298,12 @@ async function createSignedWarrantyPdf(warrantyBase64, signatureDataUrl, custome
     const pdfBase64 = warrantyBase64.includes(",") ? warrantyBase64.split(",")[1] : warrantyBase64;
     const pdfBytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
     const pdfDoc = await PDFDocument.load(pdfBytes);
-    // Embed the signature image (JPEG from compressImage)
-    const sigBase64 = signatureDataUrl.includes(",") ? signatureDataUrl.split(",")[1] : signatureDataUrl;
+    // Process signature to ensure white background (fixes black background issue)
+    const processedSig = await processSignatureWhiteBg(signatureDataUrl);
+    const sigBase64 = processedSig.includes(",") ? processedSig.split(",")[1] : processedSig;
     const sigBytes = Uint8Array.from(atob(sigBase64), c => c.charCodeAt(0));
     let sigImage;
-    if (signatureDataUrl.includes("image/png")) {
+    if (processedSig.includes("image/png")) {
       sigImage = await pdfDoc.embedPng(sigBytes);
     } else {
       sigImage = await pdfDoc.embedJpg(sigBytes);
@@ -2405,6 +2425,14 @@ const SignaturePad = ({
   const canvasRef = useRef(null);
   const [drawing, setDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
+  const fillWhite = canvas => {
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+  useEffect(() => {
+    if (canvasRef.current) fillWhite(canvasRef.current);
+  }, []);
   const getPos = e => {
     const r = canvasRef.current.getBoundingClientRect();
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -2437,7 +2465,8 @@ const SignaturePad = ({
   };
   const endDraw = () => setDrawing(false);
   const clear = () => {
-    canvasRef.current.getContext("2d").clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    const canvas = canvasRef.current;
+    fillWhite(canvas);
     setHasSignature(false);
   };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
