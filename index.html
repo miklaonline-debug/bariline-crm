@@ -52,6 +52,7 @@ var cdns = [
    'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js']
 ];
 var pdfUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+var pdfLibUrl = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
 var firebaseAppUrl = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js';
 var firebaseFirestoreUrl = 'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js';
 
@@ -72,6 +73,7 @@ loadReact().then(async function(ok) {
     return;
   }
   try { await loadScript(pdfUrl); } catch(e) { console.warn('PDF.js failed to load', e); }
+  try { await loadScript(pdfLibUrl); } catch(e) { console.warn('pdf-lib failed to load', e); }
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
@@ -181,7 +183,7 @@ async function fsLoadCollection(collectionName, fromServer) {
 }
 
 // Fields that contain large base64 data — save to localStorage instead of Firestore
-const LOCAL_STORAGE_FIELDS = ["measurementPhoto", "orderPdfData"];
+const LOCAL_STORAGE_FIELDS = ["measurementPhoto", "orderPdfData", "signedWarrantyData"];
 const PHOTO_FIELDS = ["photos"];
 function saveLocalFields(collectionName, docId, data) {
   try {
@@ -257,6 +259,71 @@ function compressImage(dataUrl, maxWidth = 800, quality = 0.55) {
     img.onerror = () => resolve(dataUrl); // fallback to original if compression fails
     img.src = dataUrl;
   });
+}
+
+// Create a signed warranty PDF by stamping the customer's signature onto the warranty PDF
+async function createSignedWarrantyPdf(warrantyBase64, signatureDataUrl, customerName, orderId, completedDate) {
+  if (!window.PDFLib) {
+    console.warn("pdf-lib not loaded");
+    return null;
+  }
+  try {
+    const {
+      PDFDocument,
+      rgb
+    } = window.PDFLib;
+    // Extract raw bytes from base64 warranty PDF
+    const pdfBase64 = warrantyBase64.includes(",") ? warrantyBase64.split(",")[1] : warrantyBase64;
+    const pdfBytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    // Embed the signature image
+    const sigBase64 = signatureDataUrl.includes(",") ? signatureDataUrl.split(",")[1] : signatureDataUrl;
+    const sigBytes = Uint8Array.from(atob(sigBase64), c => c.charCodeAt(0));
+    let sigImage;
+    if (signatureDataUrl.includes("image/png")) {
+      sigImage = await pdfDoc.embedPng(sigBytes);
+    } else {
+      sigImage = await pdfDoc.embedJpg(sigBytes);
+    }
+    // Get the last page (or first if single page)
+    const pages = pdfDoc.getPages();
+    const page = pages[pages.length - 1];
+    const {
+      width: pageW,
+      height: pageH
+    } = page.getSize();
+    // Scale signature to fit nicely — max 180px wide, maintain aspect ratio
+    const sigW = Math.min(180, sigImage.width);
+    const sigH = sigImage.height / sigImage.width * sigW;
+    // Place signature at bottom-left area of the page (with 50px margin)
+    const x = 50;
+    const y = 40;
+    page.drawImage(sigImage, {
+      x,
+      y,
+      width: sigW,
+      height: sigH
+    });
+    // Add text below signature
+    const font = await pdfDoc.embedFont("Helvetica");
+    page.drawText(customerName + " | " + orderId + " | " + (completedDate || new Date().toISOString().split("T")[0]), {
+      x: x,
+      y: y - 14,
+      size: 8,
+      font,
+      color: rgb(0.3, 0.3, 0.3)
+    });
+    // Save the modified PDF
+    const signedBytes = await pdfDoc.save();
+    // Convert to base64 data URL
+    let binary = "";
+    const bytes = new Uint8Array(signedBytes);
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return "data:application/pdf;base64," + btoa(binary);
+  } catch (err) {
+    console.error("Failed to create signed warranty PDF:", err);
+    return null;
+  }
 }
 
 // Deep-sanitize an object for Firestore: remove undefined, functions, symbols, convert special types
@@ -4539,52 +4606,66 @@ const WorkOrdersPage = ({
   const handleSignature = async (id, dataUrl) => {
     const compressed = await compressImage(dataUrl, 460, 0.6);
     const wo = workOrders.find(w => w.id === id);
-    setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
-      ...w,
+    const completedDate = new Date().toISOString().split("T")[0];
+
+    // Try to create a signed warranty PDF (signature stamped onto the warranty)
+    let signedWarrantyData = null;
+    if (warrantyPdf && warrantyPdf.base64) {
+      signedWarrantyData = await createSignedWarrantyPdf(warrantyPdf.base64, compressed, wo ? wo.customerName : "", id, completedDate);
+    }
+
+    // Save work order with signature + signed warranty PDF
+    const updateFields = {
       signed: true,
       signatureData: compressed,
       status: "completed",
-      completedDate: new Date().toISOString().split("T")[0]
+      completedDate
+    };
+    if (signedWarrantyData) updateFields.signedWarrantyData = signedWarrantyData;
+    setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
+      ...w,
+      ...updateFields
     }, "completed") : w));
     setShowSignature(null);
-    // Send warranty to customer via WhatsApp
+
+    // Send signed warranty to customer via WhatsApp
     if (wo && wo.customerPhone) {
       const phone = wo.customerPhone.replace(/[-\s]/g, "");
       const intlPhone = phone.startsWith("0") ? "972" + phone.slice(1) : phone;
-      if (warrantyPdf && warrantyPdf.base64) {
-        // Try native share API first (works on mobile — can attach PDF to WhatsApp)
+      // Use signed warranty PDF if available, otherwise fall back to original
+      const pdfToSend = signedWarrantyData || warrantyPdf && warrantyPdf.base64;
+      if (pdfToSend) {
         try {
-          const base64Data = warrantyPdf.base64.split(",")[1];
+          const base64Data = pdfToSend.includes(",") ? pdfToSend.split(",")[1] : pdfToSend;
           const byteChars = atob(base64Data);
           const byteArray = new Uint8Array(byteChars.length);
           for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
           const blob = new Blob([byteArray], {
             type: "application/pdf"
           });
-          const file = new File([blob], `אחריות_${wo.customerName}_${wo.id}.pdf`, {
+          const file = new File([blob], `אחריות_חתומה_${wo.customerName}_${wo.id}.pdf`, {
             type: "application/pdf"
           });
           if (navigator.canShare && navigator.canShare({
             files: [file]
           })) {
             navigator.share({
-              title: `תעודת אחריות — ${wo.customerName}`,
-              text: `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`,
+              title: `תעודת אחריות חתומה — ${wo.customerName}`,
+              text: `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות החתומה להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`,
               files: [file]
             }).catch(() => {});
           } else {
-            // Fallback: download PDF then open WhatsApp with message
             const downloadLink = document.createElement("a");
-            downloadLink.href = warrantyPdf.base64;
-            downloadLink.download = `אחריות_${wo.customerName}_${wo.id}.pdf`;
+            downloadLink.href = pdfToSend;
+            downloadLink.download = `אחריות_חתומה_${wo.customerName}_${wo.id}.pdf`;
             downloadLink.click();
-            const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
+            const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות החתומה להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
             const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
             setTimeout(() => window.open(waUrl, "_blank"), 800);
           }
         } catch (shareErr) {
           console.warn("Share failed, falling back to WhatsApp link:", shareErr);
-          const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
+          const waText = `שלום ${wo.customerName}, תודה שבחרת ב-Bariline!\nמצורפת תעודת האחריות החתומה להתקנה שבוצעה בתאריך ${new Date().toLocaleDateString("he-IL")}.\nלשאלות ושירות — צרו קשר.`;
           const waUrl = `https://wa.me/${intlPhone}?text=${encodeURIComponent(waText)}`;
           window.open(waUrl, "_blank");
         }
@@ -5978,7 +6059,46 @@ const WorkOrdersPage = ({
         borderRadius: 4
       },
       onClick: () => setShowImageViewer(selected.signatureData)
-    })) : /*#__PURE__*/React.createElement("div", {
+    }), selected.signedWarrantyData && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 10,
+        display: "flex",
+        gap: 6,
+        justifyContent: "center",
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowPdfViewer(selected.signedWarrantyData),
+      style: {
+        padding: "6px 14px",
+        borderRadius: 8,
+        border: "none",
+        background: colors.primary,
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit"
+      }
+    }, Icons.check, " צפה באחריות חתומה"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const a = document.createElement("a");
+        a.href = selected.signedWarrantyData;
+        a.download = `אחריות_חתומה_${selected.customerName}_${selected.id}.pdf`;
+        a.click();
+      },
+      style: {
+        padding: "6px 14px",
+        borderRadius: 8,
+        border: `1px solid ${colors.primary}`,
+        background: "transparent",
+        color: colors.primary,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit"
+      }
+    }, Icons.reports, " הורד PDF חתום"))) : /*#__PURE__*/React.createElement("div", {
       style: {
         padding: 12,
         background: colors.bg,
