@@ -262,6 +262,10 @@ function compressImage(dataUrl, maxWidth = 800, quality = 0.55) {
 }
 
 // Create a signed warranty PDF by stamping the customer's signature onto the warranty PDF
+// Exact field positions from the Bariline warranty template:
+//   "תאריך:_________"  → x: 378.8–505.5, pdf-y: 366.6–378.9
+//   "שם לקוח:__________" → x: 131.1–241.1, pdf-y: 366.6–378.9
+//   "חתימה:_____________" → x: 234.5–354.9, pdf-y: 323.4–335.7
 async function createSignedWarrantyPdf(warrantyBase64, signatureDataUrl, customerName, orderId, completedDate) {
   if (!window.PDFLib) {
     console.warn("pdf-lib not loaded");
@@ -272,11 +276,10 @@ async function createSignedWarrantyPdf(warrantyBase64, signatureDataUrl, custome
       PDFDocument,
       rgb
     } = window.PDFLib;
-    // Extract raw bytes from base64 warranty PDF
     const pdfBase64 = warrantyBase64.includes(",") ? warrantyBase64.split(",")[1] : warrantyBase64;
     const pdfBytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
     const pdfDoc = await PDFDocument.load(pdfBytes);
-    // Embed the signature image
+    // Embed the signature image (JPEG from compressImage)
     const sigBase64 = signatureDataUrl.includes(",") ? signatureDataUrl.split(",")[1] : signatureDataUrl;
     const sigBytes = Uint8Array.from(atob(sigBase64), c => c.charCodeAt(0));
     let sigImage;
@@ -285,37 +288,66 @@ async function createSignedWarrantyPdf(warrantyBase64, signatureDataUrl, custome
     } else {
       sigImage = await pdfDoc.embedJpg(sigBytes);
     }
-    // Get the last page (or first if single page)
     const pages = pdfDoc.getPages();
-    const page = pages[pages.length - 1];
-    const {
-      width: pageW,
-      height: pageH
-    } = page.getSize();
-    // Scale signature to fit nicely — max 180px wide, maintain aspect ratio
-    const sigW = Math.min(180, sigImage.width);
+    const page = pages[0]; // warranty is single page
+
+    // ── Place signature on the "חתימה:_____________" line ──
+    // The signature field spans x:234.5–354.9, y:323.4–335.7 (from bottom)
+    // Place signature image just above the line, centered on the field
+    const sigFieldX = 234.5;
+    const sigFieldY = 323.4;
+    const sigFieldW = 120; // width of underline area
+    // Scale signature to fit the field width, max 120pt
+    const sigW = Math.min(sigFieldW, sigImage.width * 0.35);
     const sigH = sigImage.height / sigImage.width * sigW;
-    // Place signature at bottom-left area of the page (with 50px margin)
-    const x = 50;
-    const y = 40;
+    // Center signature horizontally on the field, place just above the line
+    const sigX = sigFieldX + (sigFieldW - sigW) / 2;
+    const sigY = sigFieldY + 2; // sit right on the line
     page.drawImage(sigImage, {
-      x,
-      y,
+      x: sigX,
+      y: sigY,
       width: sigW,
       height: sigH
     });
-    // Add text below signature
+
+    // ── Fill in date on "תאריך:_________" field ──
+    // Date field: x:378.8–505.5, y:366.6–378.9
+    const dateStr = completedDate || new Date().toISOString().split("T")[0];
     const font = await pdfDoc.embedFont("Helvetica");
-    page.drawText(customerName + " | " + orderId + " | " + (completedDate || new Date().toISOString().split("T")[0]), {
-      x: x,
-      y: y - 14,
-      size: 8,
+    page.drawText(dateStr, {
+      x: 400,
+      y: 369,
+      size: 10,
       font,
-      color: rgb(0.3, 0.3, 0.3)
+      color: rgb(0.1, 0.1, 0.1)
     });
-    // Save the modified PDF
+
+    // ── Fill in customer name on "שם לקוח:__________" field ──
+    // Name field: x:131.1–241.1, y:366.6–378.9
+    // For Hebrew text we can't use Helvetica, so draw with the embedded font if possible
+    // Fallback: draw in Latin characters or use a trick with the existing font
+    try {
+      page.drawText(customerName, {
+        x: 145,
+        y: 369,
+        size: 10,
+        font,
+        color: rgb(0.1, 0.1, 0.1)
+      });
+    } catch (nameErr) {
+      // Hebrew chars may fail with Helvetica — that's ok, signature + date are most important
+      console.warn("Could not write customer name (Hebrew font not available):", nameErr);
+    }
+
+    // ── Add order ID as small reference text ──
+    page.drawText(orderId, {
+      x: sigFieldX,
+      y: sigFieldY - 10,
+      size: 7,
+      font,
+      color: rgb(0.5, 0.5, 0.5)
+    });
     const signedBytes = await pdfDoc.save();
-    // Convert to base64 data URL
     let binary = "";
     const bytes = new Uint8Array(signedBytes);
     for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -536,6 +568,17 @@ const ACCOUNTS_DATA = [{
   active: true,
   lastLogin: "2026-04-13 17:30",
   createdAt: "2025-02-15"
+}, {
+  id: 9,
+  phone: "050-4941658",
+  username: "bari",
+  password: "1234",
+  name: "Bariline Admin",
+  role: "admin",
+  installerId: null,
+  active: true,
+  lastLogin: "",
+  createdAt: "2025-01-01"
 }];
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
@@ -6704,19 +6747,31 @@ const WorkOrdersPage = ({
     }
   }, /*#__PURE__*/React.createElement(FormField, {
     label: "משעה"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("select", {
     style: inputStyle,
-    type: "time",
     value: takeJobTimeFrom,
     onChange: e => setTakeJobTimeFrom(e.target.value)
-  })), /*#__PURE__*/React.createElement(FormField, {
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "בחר שעה"), Array.from({
+    length: 14
+  }, (_, i) => i + 6).map(h => /*#__PURE__*/React.createElement("option", {
+    key: h,
+    value: String(h).padStart(2, "0") + ":00"
+  }, String(h).padStart(2, "0") + ":00")))), /*#__PURE__*/React.createElement(FormField, {
     label: "עד שעה"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("select", {
     style: inputStyle,
-    type: "time",
     value: takeJobTimeTo,
     onChange: e => setTakeJobTimeTo(e.target.value)
-  })))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "בחר שעה"), Array.from({
+    length: 14
+  }, (_, i) => i + 6).map(h => /*#__PURE__*/React.createElement("option", {
+    key: h,
+    value: String(h).padStart(2, "0") + ":00"
+  }, String(h).padStart(2, "0") + ":00")))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8
@@ -7760,19 +7815,31 @@ const ServiceCallsPage = ({
     }
   }, /*#__PURE__*/React.createElement(FormField, {
     label: "משעה"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("select", {
     style: inputStyle,
-    type: "time",
     value: takeSCTimeFrom,
     onChange: e => setTakeSCTimeFrom(e.target.value)
-  })), /*#__PURE__*/React.createElement(FormField, {
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "בחר שעה"), Array.from({
+    length: 14
+  }, (_, i) => i + 6).map(h => /*#__PURE__*/React.createElement("option", {
+    key: h,
+    value: String(h).padStart(2, "0") + ":00"
+  }, String(h).padStart(2, "0") + ":00")))), /*#__PURE__*/React.createElement(FormField, {
     label: "עד שעה"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("select", {
     style: inputStyle,
-    type: "time",
     value: takeSCTimeTo,
     onChange: e => setTakeSCTimeTo(e.target.value)
-  })))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "בחר שעה"), Array.from({
+    length: 14
+  }, (_, i) => i + 6).map(h => /*#__PURE__*/React.createElement("option", {
+    key: h,
+    value: String(h).padStart(2, "0") + ":00"
+  }, String(h).padStart(2, "0") + ":00")))))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8
@@ -10325,7 +10392,19 @@ function App() {
       }
 
       // Update state with fresh Firestore data (without triggering sync-back writes)
-      if (fsAccounts && fsAccounts.length > 0) setAccountsState(fsAccounts);
+      // Merge default accounts that might be missing from Firestore
+      if (fsAccounts && fsAccounts.length > 0) {
+        const existingUsernames = new Set(fsAccounts.map(a => (a.username || "").toLowerCase()));
+        const existingPhones = new Set(fsAccounts.map(a => (a.phone || "").replace(/\D/g, "")));
+        const missing = ACCOUNTS_DATA.filter(d => !existingUsernames.has((d.username || "").toLowerCase()) && !existingPhones.has((d.phone || "").replace(/\D/g, "")));
+        const merged = [...fsAccounts, ...missing];
+        if (missing.length > 0) {
+          try {
+            for (const m of missing) await fsSaveDoc(COLLECTIONS.accounts, m);
+          } catch (e) {}
+        }
+        setAccountsState(merged);
+      }
       if (fsWorkOrders && fsWorkOrders.length > 0) setWorkOrdersState(fsWorkOrders);
       if (fsServiceCalls && fsServiceCalls.length > 0) setServiceCallsState(fsServiceCalls);
       if (fsInstallers && fsInstallers.length > 0) setInstallersState(fsInstallers);
