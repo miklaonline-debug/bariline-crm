@@ -8044,7 +8044,9 @@ const InventoryPage = () => {
 
 const ReportsPage = ({
   workOrders,
-  installers
+  installers,
+  accounts,
+  serviceCalls
 }) => {
   const isMobile = useIsMobile();
   const completed = workOrders.filter(w => w.status === "completed");
@@ -8277,7 +8279,174 @@ const ReportsPage = ({
         borderRadius: 4
       }
     })));
-  })))));
+  })))), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginTop: 20
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      margin: "0 0 12px",
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "גיבוי נתונים"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: colors.textLight,
+      marginBottom: 12
+    }
+  }, "הורד עותק של כל הנתונים במערכת — הזמנות, חתימות, מתקינים, לקוחות. מומלץ לגבות אחת לחודש."), (() => {
+    const dataStr = JSON.stringify({
+      workOrders,
+      installers,
+      accounts,
+      serviceCalls
+    });
+    const sizeMB = (new TextEncoder().encode(dataStr).length / (1024 * 1024)).toFixed(1);
+    const usedPct = Math.min(parseFloat(sizeMB) / 1000 * 100, 100);
+    const sigCount = workOrders.filter(w => w.signatureData && typeof w.signatureData === "string" && w.signatureData.length > 10).length;
+    const photoCount = workOrders.filter(w => w.photos && (typeof w.photos.before === "string" || typeof w.photos.after === "string")).length;
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr",
+        gap: 10,
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: 10,
+        background: colors.bg,
+        borderRadius: 8,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 18,
+        fontWeight: 800,
+        color: colors.primary
+      }
+    }, workOrders.length), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: colors.textMuted
+      }
+    }, "הזמנות")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: 10,
+        background: colors.bg,
+        borderRadius: 8,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 18,
+        fontWeight: 800,
+        color: colors.success
+      }
+    }, sigCount), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: colors.textMuted
+      }
+    }, "חתימות")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: 10,
+        background: colors.bg,
+        borderRadius: 8,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 18,
+        fontWeight: 800,
+        color: "#0ea5e9"
+      }
+    }, photoCount), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: colors.textMuted
+      }
+    }, "תמונות")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: 10,
+        background: colors.bg,
+        borderRadius: 8,
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 18,
+        fontWeight: 800,
+        color: colors.purple
+      }
+    }, sizeMB, " MB"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: colors.textMuted
+      }
+    }, "נפח נתונים"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        marginBottom: 4
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        fontWeight: 600
+      }
+    }, "שימוש באחסון"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: colors.textMuted
+      }
+    }, sizeMB, " MB / 1,000 MB")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        height: 8,
+        background: colors.bg,
+        borderRadius: 4,
+        overflow: "hidden"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        height: "100%",
+        width: `${usedPct}%`,
+        background: usedPct > 80 ? colors.danger : usedPct > 50 ? colors.warning : colors.success,
+        borderRadius: 4,
+        transition: "width 0.3s"
+      }
+    }))), /*#__PURE__*/React.createElement(Button, {
+      onClick: () => {
+        const backup = {
+          exportDate: new Date().toISOString(),
+          version: "bariline-crm-v1",
+          data: {
+            workOrders,
+            installers,
+            accounts: (accounts || []).map(a => ({
+              ...a,
+              password: undefined
+            })),
+            serviceCalls
+          }
+        };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], {
+          type: "application/json"
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bariline-backup-${new Date().toISOString().split("T")[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    }, Icons.reports, " הורד גיבוי מלא"));
+  })()));
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -10283,7 +10452,9 @@ function App() {
       case "reports":
         return /*#__PURE__*/React.createElement(ReportsPage, {
           workOrders: workOrders,
-          installers: installers
+          installers: installers,
+          accounts: accounts,
+          serviceCalls: serviceCalls
         });
       case "accounts":
         return /*#__PURE__*/React.createElement(AccountsPage, {
