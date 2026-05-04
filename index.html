@@ -10379,7 +10379,19 @@ function App() {
 
       // SAFE SEEDING: Only seed if this is the very first time EVER (use localStorage flag)
       // This prevents re-seeding when Firestore temporarily returns empty
-      const hasBeenSeeded = localStorage.getItem("bariline_db_seeded");
+      // Check BOTH localStorage AND Firestore for seed flag — covers new devices too
+      const hasBeenSeededLocal = localStorage.getItem("bariline_db_seeded");
+      let hasBeenSeededRemote = false;
+      try {
+        const db = getDb();
+        if (db) {
+          const flagDoc = await db.collection("_meta").doc("seed_flag").get();
+          hasBeenSeededRemote = flagDoc.exists;
+        }
+      } catch (e) {}
+      const hasBeenSeeded = hasBeenSeededLocal || hasBeenSeededRemote;
+      // Always set local flag if remote flag exists (sync for this device)
+      if (hasBeenSeededRemote && !hasBeenSeededLocal) localStorage.setItem("bariline_db_seeded", "true");
       if (isInitial && !hasBeenSeeded) {
         let didSeed = false;
         if (fsAccounts && fsAccounts.length === 0) {
@@ -10405,8 +10417,15 @@ function App() {
         const [fsCust, fsInv] = await Promise.all([fsLoadCollection(COLLECTIONS.customers), fsLoadCollection(COLLECTIONS.inventory)]);
         if (fsCust && fsCust.length === 0) await fsSeedCollection(COLLECTIONS.customers, CUSTOMERS_DATA);
         if (fsInv && fsInv.length === 0) await fsSeedCollection(COLLECTIONS.inventory, INVENTORY_DATA);
-        // Mark as seeded so we NEVER re-seed demo data
+        // Mark as seeded in BOTH localStorage AND Firestore — so no device ever re-seeds
         localStorage.setItem("bariline_db_seeded", "true");
+        try {
+          const db = getDb();
+          if (db) await db.collection("_meta").doc("seed_flag").set({
+            seeded: true,
+            date: new Date().toISOString()
+          });
+        } catch (e) {}
       } else if (isInitial && hasBeenSeeded) {
         // DB was seeded before — if Firestore returns empty, it means a real problem, not first load
         // Don't overwrite with defaults! Just use whatever Firestore gives us.
