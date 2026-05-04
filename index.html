@@ -10875,7 +10875,64 @@ function App() {
       overflow: "auto",
       padding: isMobile ? 10 : 20
     }
-  }, renderPage())));
+  }, isAdmin && (() => {
+    const allData = JSON.stringify({
+      workOrders,
+      installers,
+      accounts,
+      serviceCalls
+    });
+    const sizeMB = new TextEncoder().encode(allData).length / (1024 * 1024);
+    const pct = sizeMB / 1000 * 100;
+    if (pct < 70) return null;
+    const isUrgent = pct >= 90;
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: "14px 18px",
+        marginBottom: 14,
+        borderRadius: 12,
+        background: isUrgent ? "#fef2f2" : "#fffbeb",
+        border: `2px solid ${isUrgent ? "#dc2626" : "#f59e0b"}`,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 28
+      }
+    }, isUrgent ? Icons.warning : Icons.warning), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 15,
+        fontWeight: 800,
+        color: isUrgent ? "#dc2626" : "#d97706",
+        marginBottom: 2
+      }
+    }, isUrgent ? "אחסון כמעט מלא!" : "אחסון מתמלא"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: isUrgent ? "#991b1b" : "#92400e"
+      }
+    }, sizeMB.toFixed(0), " MB מתוך 1,000 MB בשימוש (", pct.toFixed(0), "%). ", isUrgent ? "יש לגבות ולפנות נתונים בהקדם!" : "מומלץ לגבות נתונים בדוחות.")), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPage("reports"),
+      style: {
+        padding: "8px 16px",
+        borderRadius: 8,
+        border: "none",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontWeight: 700,
+        fontSize: 13,
+        background: isUrgent ? "#dc2626" : "#f59e0b",
+        color: "white"
+      }
+    }, Icons.reports, " גיבוי עכשיו"));
+  })(), renderPage())));
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
