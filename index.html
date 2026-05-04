@@ -8737,6 +8737,13 @@ const AccountsPage = ({
     };
     setAccounts(prev => [...prev, acc]);
     setShowCreate(false);
+    // Send login details via WhatsApp
+    const loginUrl = "https://bariline.github.io/bariline-crm/";
+    const roleLabel = acc.role === "admin" ? "מנהל" : "מתקין";
+    const waMessage = `שלום ${acc.name},\n\nנוצר עבורך חשבון ${roleLabel} במערכת Bariline CRM.\n\nפרטי התחברות:\nשם משתמש: ${acc.username}\nסיסמה: ${acc.password}\n\nקישור למערכת:\n${loginUrl}\n\nבהצלחה!`;
+    const phoneClean = acc.phone.replace(/[-\s]/g, "");
+    const intlPhone = phoneClean.startsWith("0") ? "972" + phoneClean.slice(1) : phoneClean;
+    window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(waMessage)}`, "_blank");
     setNewAcc({
       name: "",
       phone: "",
