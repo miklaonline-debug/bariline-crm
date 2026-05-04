@@ -10251,9 +10251,9 @@ function App() {
   const [page, setPage] = useState("dashboard");
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
-  const [workOrders, setWorkOrdersState] = useState(WORK_ORDERS_DATA);
-  const [installers, setInstallersState] = useState(INSTALLERS_DATA);
-  const [accounts, setAccountsState] = useState(ACCOUNTS_DATA);
+  const [workOrders, setWorkOrdersState] = useState([]);
+  const [installers, setInstallersState] = useState([]);
+  const [accounts, setAccountsState] = useState([]);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [showNotifications, setShowNotifications] = useState(false);
   const [warrantyPdf, setWarrantyPdfState] = useState(() => {
@@ -10272,8 +10272,9 @@ function App() {
       console.warn("Failed to save warranty PDF to localStorage:", e);
     }
   }, []);
-  const [serviceCalls, setServiceCallsState] = useState(SERVICE_CALLS_DATA);
+  const [serviceCalls, setServiceCallsState] = useState([]);
   const [dbReady, setDbReady] = useState(false);
+  const dbReadyRef = useRef(false);
   const [dbStatus, setDbStatus] = useState("loading"); // loading | online | offline
   const [usageAlert, setUsageAlert] = useState(null);
   const usageIntervalRef = useRef(null);
@@ -10290,6 +10291,7 @@ function App() {
   // ─── Firestore sync helper — saves changed items OUTSIDE setState ────
   const syncToFirestore = useCallback(async (collectionName, prev, next, idField = "id") => {
     if (!Array.isArray(next)) return;
+    if (!dbReadyRef.current) return; // CRITICAL: don't sync before initial Firestore load completes
     if (!getDb()) {
       console.warn("Firestore not ready, skipping save for", collectionName);
       return;
@@ -10362,58 +10364,73 @@ function App() {
     if (!db) {
       if (isInitial) {
         setDbStatus("offline");
-        setDbReady(true);
+        {
+          dbReadyRef.current = true;
+          setDbReady(true);
+        }
+        ;
       }
       return;
     }
     try {
       // Force server reads on refresh (not initial) to get latest data from other users
       const forceServer = !isInitial;
-      const [fsAccounts, fsWorkOrders, fsServiceCalls, fsInstallers] = await Promise.all([fsLoadCollection(COLLECTIONS.accounts, forceServer), fsLoadCollection(COLLECTIONS.workOrders, forceServer), fsLoadCollection(COLLECTIONS.serviceCalls, forceServer), fsLoadCollection(COLLECTIONS.installers, forceServer)]);
+      let [fsAccounts, fsWorkOrders, fsServiceCalls, fsInstallers] = await Promise.all([fsLoadCollection(COLLECTIONS.accounts, forceServer), fsLoadCollection(COLLECTIONS.workOrders, forceServer), fsLoadCollection(COLLECTIONS.serviceCalls, forceServer), fsLoadCollection(COLLECTIONS.installers, forceServer)]);
 
-      // Seed empty collections with default data (only on initial load)
-      if (isInitial) {
+      // SAFE SEEDING: Only seed if this is the very first time EVER (use localStorage flag)
+      // This prevents re-seeding when Firestore temporarily returns empty
+      const hasBeenSeeded = localStorage.getItem("bariline_db_seeded");
+      if (isInitial && !hasBeenSeeded) {
+        let didSeed = false;
         if (fsAccounts && fsAccounts.length === 0) {
           await fsSeedCollection(COLLECTIONS.accounts, ACCOUNTS_DATA);
+          fsAccounts = ACCOUNTS_DATA;
+          didSeed = true;
         }
         if (fsWorkOrders && fsWorkOrders.length === 0) {
           await fsSeedCollection(COLLECTIONS.workOrders, WORK_ORDERS_DATA);
+          fsWorkOrders = WORK_ORDERS_DATA;
+          didSeed = true;
         }
         if (fsServiceCalls && fsServiceCalls.length === 0) {
           await fsSeedCollection(COLLECTIONS.serviceCalls, SERVICE_CALLS_DATA);
+          fsServiceCalls = SERVICE_CALLS_DATA;
+          didSeed = true;
         }
         if (fsInstallers && fsInstallers.length === 0) {
           await fsSeedCollection(COLLECTIONS.installers, INSTALLERS_DATA);
+          fsInstallers = INSTALLERS_DATA;
+          didSeed = true;
         }
-        // Also seed customers, inventory if empty
         const [fsCust, fsInv] = await Promise.all([fsLoadCollection(COLLECTIONS.customers), fsLoadCollection(COLLECTIONS.inventory)]);
         if (fsCust && fsCust.length === 0) await fsSeedCollection(COLLECTIONS.customers, CUSTOMERS_DATA);
         if (fsInv && fsInv.length === 0) await fsSeedCollection(COLLECTIONS.inventory, INVENTORY_DATA);
+        // Mark as seeded so we NEVER re-seed demo data
+        localStorage.setItem("bariline_db_seeded", "true");
+      } else if (isInitial && hasBeenSeeded) {
+        // DB was seeded before — if Firestore returns empty, it means a real problem, not first load
+        // Don't overwrite with defaults! Just use whatever Firestore gives us.
       }
 
-      // Update state with fresh Firestore data (without triggering sync-back writes)
-      // Merge default accounts that might be missing from Firestore
-      if (fsAccounts && fsAccounts.length > 0) {
-        const existingUsernames = new Set(fsAccounts.map(a => (a.username || "").toLowerCase()));
-        const existingPhones = new Set(fsAccounts.map(a => (a.phone || "").replace(/\D/g, "")));
-        const missing = ACCOUNTS_DATA.filter(d => !existingUsernames.has((d.username || "").toLowerCase()) && !existingPhones.has((d.phone || "").replace(/\D/g, "")));
-        const merged = [...fsAccounts, ...missing];
-        if (missing.length > 0) {
-          try {
-            for (const m of missing) await fsSaveDoc(COLLECTIONS.accounts, m);
-          } catch (e) {}
-        }
-        setAccountsState(merged);
-      }
+      // Update state with Firestore data (no sync-back)
+      if (fsAccounts && fsAccounts.length > 0) setAccountsState(fsAccounts);else if (isInitial) setAccountsState(ACCOUNTS_DATA); // fallback only if truly no data
       if (fsWorkOrders && fsWorkOrders.length > 0) setWorkOrdersState(fsWorkOrders);
       if (fsServiceCalls && fsServiceCalls.length > 0) setServiceCallsState(fsServiceCalls);
       if (fsInstallers && fsInstallers.length > 0) setInstallersState(fsInstallers);
       setDbStatus("online");
     } catch (err) {
       console.error("Firestore load error:", err);
-      if (isInitial) setDbStatus("offline");
+      if (isInitial) {
+        setDbStatus("offline");
+        // Offline fallback: use defaults ONLY for login, but don't sync them
+        setAccountsState(ACCOUNTS_DATA);
+      }
     }
-    if (isInitial) setDbReady(true);
+    if (isInitial) {
+      dbReadyRef.current = true;
+      setDbReady(true);
+    }
+    ;
   }, []);
 
   // Initial load on mount
