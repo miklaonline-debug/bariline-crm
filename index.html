@@ -4370,12 +4370,12 @@ const WorkOrdersPage = ({
       customerId: null,
       customerName: newOrder.customerName,
       customerPhone: newOrder.customerPhone,
-      installerId: null,
-      installerName: null,
+      installerId: installer ? installer.id : null,
+      installerName: installer ? installer.name : null,
       type: newOrder.type,
       product: newOrder.product,
       productType: newOrder.productType,
-      status: "pending",
+      status: installer ? "scheduled" : "pending",
       priority: newOrder.priority,
       createdDate: new Date().toISOString().split("T")[0],
       scheduledDate: newOrder.scheduledDate,
@@ -4400,6 +4400,11 @@ const WorkOrdersPage = ({
     };
     setWorkOrders(prev => [order, ...prev]);
     setShowCreate(false);
+    // Notify installer via WhatsApp about new job
+    if (installer) {
+      const msg = `שלום ${installer.name},\n\nעבודה חדשה במערכת Bariline!\n\nלקוח: ${order.customerName}\nמוצר: ${order.product}\nכתובת: ${order.address || "—"}\nתאריך: ${order.scheduledDate || "טרם נקבע"}\n\nהיכנס למערכת לפרטים:\nhttps://bariline.github.io/bariline-crm/`;
+      notifyInstaller(installer.phone, msg);
+    }
     setNewOrder({
       customerName: "",
       customerPhone: "",
