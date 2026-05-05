@@ -192,6 +192,48 @@ function getDb() {
   }
   return _db;
 }
+
+// ─── Aggressive compression to fit photos in Firestore ──────────────────────
+
+function compressForFirestore(dataUrl, maxWidth = 600, quality = 0.4) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let w = img.width,
+        h = img.height;
+      if (w > maxWidth) {
+        h = Math.round(h * maxWidth / w);
+        w = maxWidth;
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      let result = canvas.toDataURL("image/jpeg", quality);
+      // If still too big, compress harder
+      if (result.length > MAX_FIELD_SIZE) {
+        const smallerW = Math.round(w * 0.6);
+        const smallerH = Math.round(h * 0.6);
+        canvas.width = smallerW;
+        canvas.height = smallerH;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, smallerW, smallerH);
+        ctx.drawImage(img, 0, 0, smallerW, smallerH);
+        result = canvas.toDataURL("image/jpeg", 0.3);
+      }
+      resolve(result);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+async function shrinkFieldForFirestore(val) {
+  if (typeof val !== "string" || !val.startsWith("data:") || val.length <= MAX_FIELD_SIZE) return val;
+  return compressForFirestore(val);
+}
 const COLLECTIONS = {
   accounts: "accounts",
   workOrders: "workOrders",
@@ -277,21 +319,28 @@ function loadLocalFields(collectionName, doc) {
     const result = {
       ...doc
     };
-    // Restore photos
+    // Restore photos from localStorage ONLY if Firestore has `true` (stripped marker)
+    // If Firestore has a URL string, it came from Storage — don't override
     const savedPhotos = localStorage.getItem(`fs_photos_${collectionName}_${docId}`);
     if (savedPhotos) {
       try {
         const parsed = JSON.parse(savedPhotos);
-        result.photos = {
-          ...(result.photos || {}),
-          ...parsed
+        const merged = {
+          ...(result.photos || {})
         };
+        Object.entries(parsed).forEach(([key, val]) => {
+          // Only restore from localStorage if Firestore value is missing or `true`
+          if (!merged[key] || merged[key] === true) merged[key] = val;
+        });
+        result.photos = merged;
       } catch (e) {}
     }
-    // Restore other large fields
+    // Restore other large fields — only if Firestore has `true` (stripped)
     LOCAL_STORAGE_FIELDS.forEach(field => {
-      const saved = localStorage.getItem(`fs_${field}_${collectionName}_${docId}`);
-      if (saved) result[field] = saved;
+      if (result[field] === true || !result[field]) {
+        const saved = localStorage.getItem(`fs_${field}_${collectionName}_${docId}`);
+        if (saved) result[field] = saved;
+      }
     });
     return result;
   } catch (e) {
@@ -460,35 +509,62 @@ function sanitizeForFirestore(obj) {
 
 // Max size per field for Firestore storage (300KB base64 ≈ 225KB raw image)
 const MAX_FIELD_SIZE = 300000;
+function isBase64Large(val) {
+  return typeof val === "string" && val.startsWith("data:") && val.length > MAX_FIELD_SIZE;
+}
 function stripLargeFields(data) {
   const clean = {
     ...data
   };
   delete clean._docId;
-  // Strip only truly huge photos (uncompressed originals) — keep compressed ones
+  // Strip only large base64 photos — keep URLs (from Storage) and small base64
   if (clean.photos && typeof clean.photos === "object") {
     const stripped = {};
     Object.entries(clean.photos).forEach(([key, val]) => {
-      stripped[key] = typeof val === "string" && val.length > MAX_FIELD_SIZE ? true : val;
+      stripped[key] = isBase64Large(val) ? true : val;
     });
     clean.photos = stripped;
   }
-  // Strip only truly large fields — compressed ones should fit
+  // Strip only large base64 fields — keep URLs from Firebase Storage
   LOCAL_STORAGE_FIELDS.forEach(field => {
-    if (clean[field] && typeof clean[field] === "string" && clean[field].length > MAX_FIELD_SIZE) {
+    if (isBase64Large(clean[field])) {
       clean[field] = true;
     }
   });
   return clean;
 }
+async function shrinkLargeFields(data) {
+  const result = {
+    ...data
+  };
+  // Compress photos to fit in Firestore
+  if (result.photos && typeof result.photos === "object") {
+    const shrunk = {
+      ...result.photos
+    };
+    for (const [key, val] of Object.entries(shrunk)) {
+      shrunk[key] = await shrinkFieldForFirestore(val);
+    }
+    result.photos = shrunk;
+  }
+  // Compress large string fields
+  for (const field of LOCAL_STORAGE_FIELDS) {
+    if (result[field]) {
+      result[field] = await shrinkFieldForFirestore(result[field]);
+    }
+  }
+  return result;
+}
 async function fsSaveDocument(collectionName, docId, data) {
   const db = getDb();
   if (!db) return false;
   try {
-    // Save large base64 fields to localStorage
+    // Save original large base64 fields to localStorage as high-res backup
     saveLocalFields(collectionName, docId, data);
-    // Strip large fields before saving to Firestore (1MB limit)
-    const stripped = stripLargeFields(data);
+    // Compress large photos/PDFs to fit within Firestore 1MB doc limit
+    const shrunk = await shrinkLargeFields(data);
+    // Strip any remaining oversized fields (safety net)
+    const stripped = stripLargeFields(shrunk);
     // Deep-sanitize to remove undefined/functions that Firestore rejects
     const cleanData = sanitizeForFirestore(stripped);
     await db.collection(collectionName).doc(String(docId)).set(cleanData);
