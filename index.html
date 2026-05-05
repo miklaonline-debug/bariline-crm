@@ -108,6 +108,67 @@ const FIREBASE_CONFIG = {
   appId: "1:1042161550667:web:61a07d439a34c4705b94ce"
 };
 
+// ─── IndexedDB for large blobs (warranty PDF template) ─────────────────────
+
+const IDB_NAME = "bariline_idb";
+const IDB_STORE = "blobs";
+const IDB_VERSION = 1;
+function openIdb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await openIdb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+async function idbGet(key) {
+  const db = await openIdb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => {
+      db.close();
+      resolve(req.result || null);
+    };
+    req.onerror = () => {
+      db.close();
+      reject(req.error);
+    };
+  });
+}
+async function idbDelete(key) {
+  const db = await openIdb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
 // ─── Firestore Service Layer ────────────────────────────────────────────────
 
 let _db = null;
@@ -10479,22 +10540,66 @@ function App() {
   const [accounts, setAccountsState] = useState([]);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [warrantyPdf, setWarrantyPdfState] = useState(() => {
-    try {
-      const saved = localStorage.getItem("bariline_warrantyPdf");
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      return null;
-    }
-  });
+  const [warrantyPdf, setWarrantyPdfState] = useState(null);
+  const warrantyPdfLoaded = useRef(false);
+
+  // Load warranty PDF from IndexedDB on mount (handles large files that exceed localStorage limits)
+  useEffect(() => {
+    if (warrantyPdfLoaded.current) return;
+    warrantyPdfLoaded.current = true;
+    (async () => {
+      try {
+        // Try IndexedDB first (new storage)
+        const idbVal = await idbGet("warrantyPdf");
+        if (idbVal) {
+          setWarrantyPdfState(idbVal);
+          return;
+        }
+        // Migrate from localStorage if present (old storage)
+        const lsVal = localStorage.getItem("bariline_warrantyPdf");
+        if (lsVal) {
+          const parsed = JSON.parse(lsVal);
+          setWarrantyPdfState(parsed);
+          await idbSet("warrantyPdf", parsed);
+          localStorage.removeItem("bariline_warrantyPdf");
+        }
+      } catch (e) {
+        console.warn("Failed to load warranty PDF:", e);
+      }
+    })();
+  }, []);
   const setWarrantyPdf = useCallback(val => {
     setWarrantyPdfState(val);
-    try {
-      if (val) localStorage.setItem("bariline_warrantyPdf", JSON.stringify(val));else localStorage.removeItem("bariline_warrantyPdf");
-    } catch (e) {
-      console.warn("Failed to save warranty PDF to localStorage:", e);
-    }
+    (async () => {
+      try {
+        if (val) await idbSet("warrantyPdf", val);else await idbDelete("warrantyPdf");
+      } catch (e) {
+        console.warn("Failed to save warranty PDF to IndexedDB:", e);
+      }
+    })();
   }, []);
+  // ─── PWA Install Prompt ────
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showIosInstall, setShowIosInstall] = useState(false);
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  useEffect(() => {
+    const handler = e => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+  const handleInstallClick = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const result = await installPrompt.userChoice;
+      if (result.outcome === "accepted") setInstallPrompt(null);
+    } else if (isIos) {
+      setShowIosInstall(true);
+    }
+  };
   const [serviceCalls, setServiceCallsState] = useState([]);
   const [dbReady, setDbReady] = useState(false);
   const dbReadyRef = useRef(false);
@@ -11101,7 +11206,36 @@ function App() {
       fontSize: 10,
       color: "rgba(255,255,255,0.4)"
     }
-  }, isAdmin ? "מנהל" : "מתקין"))), /*#__PURE__*/React.createElement("button", {
+  }, isAdmin ? "מנהל" : "מתקין"))), !isStandalone && (installPrompt || isIos) && /*#__PURE__*/React.createElement("button", {
+    onClick: handleInstallClick,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      width: "100%",
+      padding: "7px 10px",
+      borderRadius: 6,
+      border: "none",
+      background: "linear-gradient(135deg, #3b82f620, #10b98120)",
+      color: "#10b981",
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 600,
+      fontFamily: "inherit",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "14",
+    height: "14",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    viewBox: "0 0 24 24"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M12 5v14M5 12l7-7 7 7"
+  })), /*#__PURE__*/React.createElement("span", null, "שמור במסך הבית")), /*#__PURE__*/React.createElement("button", {
     onClick: handleLogout,
     style: {
       display: "flex",
@@ -11390,7 +11524,75 @@ function App() {
         color: "white"
       }
     }, Icons.reports, " גיבוי עכשיו"));
-  })(), renderPage())));
+  })(), renderPage())), showIosInstall && /*#__PURE__*/React.createElement(Modal, {
+    title: "שמירה במסך הבית",
+    onClose: () => setShowIosInstall(false),
+    width: 340
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "10px 0"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "40",
+    height: "40",
+    fill: "none",
+    stroke: "#3b82f6",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    viewBox: "0 0 24 24"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"
+  }), /*#__PURE__*/React.createElement("polyline", {
+    points: "16 6 12 2 8 6"
+  }), /*#__PURE__*/React.createElement("line", {
+    x1: "12",
+    y1: "2",
+    x2: "12",
+    y2: "15"
+  }))), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 16,
+      color: colors.text
+    }
+  }, "הוספה למסך הבית באייפון"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "right",
+      fontSize: 14,
+      lineHeight: 2,
+      color: colors.textLight
+    }
+  }, /*#__PURE__*/React.createElement("div", null, "1. לחץ על כפתור השיתוף ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      border: "1px solid #ccc",
+      borderRadius: 4,
+      padding: "1px 6px",
+      fontSize: 16
+    }
+  }, "↑"), " בסרגל התחתון"), /*#__PURE__*/React.createElement("div", null, "2. גלול למטה ובחר ", /*#__PURE__*/React.createElement("strong", {
+    style: {
+      color: colors.text
+    }
+  }, "הוסף למסך הבית")), /*#__PURE__*/React.createElement("div", null, "3. לחץ ", /*#__PURE__*/React.createElement("strong", {
+    style: {
+      color: colors.text
+    }
+  }, "הוסף"))), /*#__PURE__*/React.createElement(Button, {
+    onClick: () => setShowIosInstall(false),
+    style: {
+      marginTop: 20,
+      width: "100%"
+    }
+  }, "הבנתי"))));
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
