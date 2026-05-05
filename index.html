@@ -4501,6 +4501,14 @@ const WorkOrdersPage = ({
       ...extra
     }]
   });
+
+  // WhatsApp notification to installer
+  const notifyInstaller = (phone, message) => {
+    if (!phone) return;
+    const clean = phone.replace(/[-\s]/g, "");
+    const intl = clean.startsWith("0") ? "972" + clean.slice(1) : clean;
+    window.open(`https://wa.me/${intl}?text=${encodeURIComponent(message)}`, "_blank");
+  };
   const updateStatus = (id, newStatus) => {
     setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
       ...w,
@@ -4563,6 +4571,7 @@ const WorkOrdersPage = ({
   const adminChangeInstaller = (woId, newInstId) => {
     const inst = installers.find(i => i.id === Number(newInstId));
     if (!inst) return;
+    const wo = workOrders.find(w => w.id === woId);
     setWorkOrders(prev => prev.map(w => w.id === woId ? addLog({
       ...w,
       installerId: inst.id,
@@ -4575,6 +4584,11 @@ const WorkOrdersPage = ({
       installerId: inst.id,
       installerName: inst.name
     } : prev);
+    // Notify new installer via WhatsApp
+    if (wo) {
+      const msg = `שלום ${inst.name},\n\nשובצת לעבודה במערכת Bariline:\n\nלקוח: ${wo.customerName}\nמוצר: ${wo.product}\nכתובת: ${wo.address || "—"}\nתאריך: ${wo.scheduledDate || "טרם נקבע"}\n\nהיכנס למערכת לפרטים נוספים:\nhttps://bariline.github.io/bariline-crm/`;
+      notifyInstaller(inst.phone, msg);
+    }
   };
   const rejectJob = (id, reason) => {
     const inst = installers.find(i => i.id === installerId);
@@ -4669,6 +4683,7 @@ const WorkOrdersPage = ({
     reader.readAsDataURL(file);
   };
   const markGlassReady = id => {
+    const wo = workOrders.find(w => w.id === id);
     setWorkOrders(prev => prev.map(w => w.id === id ? addLog({
       ...w,
       glassReady: true,
@@ -4676,6 +4691,14 @@ const WorkOrdersPage = ({
       status: "pending",
       glassReadyMatched: false
     }, "glass_ready") : w));
+    // Notify installer via WhatsApp
+    if (wo && wo.installerId) {
+      const inst = installers.find(i => i.id === wo.installerId);
+      if (inst) {
+        const msg = `שלום ${inst.name},\n\nהזכוכית מוכנה להזמנה:\n\nלקוח: ${wo.customerName}\nמוצר: ${wo.product}\nכתובת: ${wo.address || "—"}\n\nיש להיכנס למערכת ולקבוע תאריך התקנה:\nhttps://bariline.github.io/bariline-crm/`;
+        notifyInstaller(inst.phone, msg);
+      }
+    }
   };
   const handleSignature = async (id, dataUrl) => {
     const compressed = await compressImage(dataUrl, 460, 0.6);
