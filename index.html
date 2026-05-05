@@ -4649,11 +4649,20 @@ const WorkOrdersPage = ({
   };
   const saveEditOrder = () => {
     if (!editOrder) return;
+    const prevOrder = workOrders.find(w => w.id === editOrder.id);
     setWorkOrders(prev => prev.map(w => w.id === editOrder.id ? {
       ...w,
       ...editOrder
     } : w));
     setSelected(editOrder);
+    // Notify installer if newly assigned or changed
+    if (editOrder.installerId && (!prevOrder || prevOrder.installerId !== editOrder.installerId)) {
+      const inst = installers.find(i => i.id === editOrder.installerId);
+      if (inst) {
+        const msg = `שלום ${inst.name},\n\nעבודה חדשה במערכת Bariline!\n\nלקוח: ${editOrder.customerName}\nמוצר: ${editOrder.product}\nכתובת: ${editOrder.address || "—"}\nתאריך: ${editOrder.scheduledDate || "טרם נקבע"}\n\nהיכנס למערכת לפרטים:\nhttps://bariline.github.io/bariline-crm/`;
+        notifyInstaller(inst.phone, msg);
+      }
+    }
     setEditOrder(null);
   };
   const deleteOrder = id => {
