@@ -2,7 +2,9 @@
   "name": "Bariline CRM",
   "short_name": "Bariline",
   "description": "מערכת ניהול מתקינים — Bariline",
-  "start_url": "./index.html",
+  "start_url": ".",
+  "scope": ".",
+  "id": "/bariline-crm/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f8fafc",
@@ -14,13 +16,25 @@
       "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
