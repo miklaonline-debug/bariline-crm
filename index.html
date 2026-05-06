@@ -10821,6 +10821,16 @@ function App() {
         }
       }
     }
+    // Wait for writes to actually reach the server before reporting success
+    if (allOk) {
+      try {
+        const db = getDb();
+        if (db) await db.waitForPendingWrites();
+      } catch (e) {
+        console.warn("waitForPendingWrites:", e);
+        allOk = false;
+      }
+    }
     showSaveStatus(allOk ? "saved" : "error");
   }, [saveToLocalBackup]);
 
@@ -10898,6 +10908,28 @@ function App() {
         }
       }
     }
+    // Wait for ALL pending writes to actually reach the server
+    try {
+      await db.waitForPendingWrites();
+    } catch (e) {
+      console.error("waitForPendingWrites failed:", e);
+      allOk = false;
+    }
+    // Verify by reading back from server
+    if (allOk) {
+      try {
+        const verify = await db.collection(COLLECTIONS.workOrders).get({
+          source: "server"
+        });
+        console.log("Server verification: workOrders has", verify.size, "docs");
+        if (verify.size === 0 && workOrdersRef.current.length > 0) {
+          allOk = false;
+          console.error("VERIFICATION FAILED: server has 0 docs but local has", workOrdersRef.current.length);
+        }
+      } catch (e) {
+        console.warn("Server verification failed (offline?):", e);
+      }
+    }
     showSaveStatus(allOk ? "saved" : "error");
   }, [saveToLocalBackup]);
 
@@ -10928,8 +10960,8 @@ function App() {
       return;
     }
     try {
-      // Force server reads on refresh (not initial) to get latest data from other users
-      const forceServer = !isInitial;
+      // ALWAYS force server reads to ensure we get the latest data
+      const forceServer = true;
       let [fsAccounts, fsWorkOrders, fsServiceCalls, fsInstallers] = await Promise.all([fsLoadCollection(COLLECTIONS.accounts, forceServer), fsLoadCollection(COLLECTIONS.workOrders, forceServer), fsLoadCollection(COLLECTIONS.serviceCalls, forceServer), fsLoadCollection(COLLECTIONS.installers, forceServer)]);
 
       // SAFE SEEDING: Only seed if this is the very first time EVER (use localStorage flag)
