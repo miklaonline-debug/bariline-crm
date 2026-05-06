@@ -568,11 +568,13 @@ async function fsSaveDocument(collectionName, docId, data) {
     const stripped = stripLargeFields(shrunk);
     // Deep-sanitize to remove undefined/functions that Firestore rejects
     const cleanData = sanitizeForFirestore(stripped);
+    console.log("[SAVE] Writing to Firestore:", collectionName, docId, Object.keys(cleanData).length, "fields");
     await db.collection(collectionName).doc(String(docId)).set(cleanData);
     usageCounters.writes++;
+    console.log("[SAVE] SUCCESS:", collectionName, docId);
     return true;
   } catch (err) {
-    console.error("Firestore save error:", collectionName, docId, err);
+    console.error("[SAVE] FAILED:", collectionName, docId, err);
     return false;
   }
 }
@@ -4448,6 +4450,23 @@ const PdfRenderer = ({
 
 // ─── Work Orders Page (shared admin/installer) ──────────────────────────────
 
+// Generate next unique work order ID by finding the max existing number
+function nextWorkOrderId(workOrders) {
+  let maxNum = 0;
+  if (Array.isArray(workOrders)) {
+    workOrders.forEach(wo => {
+      if (wo.id && typeof wo.id === "string") {
+        const match = wo.id.match(/WO-\d+-(\d+)/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+    });
+  }
+  const year = new Date().getFullYear();
+  return `WO-${year}-${String(maxNum + 1).padStart(3, "0")}`;
+}
 const WorkOrdersPage = ({
   workOrders,
   setWorkOrders,
@@ -4546,7 +4565,7 @@ const WorkOrdersPage = ({
   const createOrder = () => {
     const installer = newOrder.installerId ? installers.find(i => String(i.id) === String(newOrder.installerId)) : null;
     const order = {
-      id: `WO-2026-${String(workOrders.length + 1).padStart(3, "0")}`,
+      id: nextWorkOrderId(workOrders),
       customerId: null,
       customerName: newOrder.customerName,
       customerPhone: newOrder.customerPhone,
@@ -5041,7 +5060,7 @@ const WorkOrdersPage = ({
     e.target.value = "";
   };
   const handlePhotoImport = fields => {
-    const woId = `WO-2026-${String(workOrders.length + 1).padStart(3, "0")}`;
+    const woId = nextWorkOrderId(workOrders);
     // Try to match installer name to existing installer
     const matchedInstaller = fields.installerName ? installers.find(i => i.name.includes(fields.installerName) || fields.installerName.includes(i.name.split(" ")[0])) : null;
     const newWO = {
@@ -9782,7 +9801,7 @@ const BarakIntegrationPage = ({
     const newProduct = products[ri];
     const newAddress = addresses[ri];
     const barakId = `BRK-${8860 + syncLog.length}`;
-    const woId = `WO-2026-${String(workOrders.length + 1).padStart(3, "0")}`;
+    const woId = nextWorkOrderId(workOrders);
     const amount = [3200, 4500, 5800, 3800, 6200][ri];
 
     // Create the work order
@@ -10769,7 +10788,11 @@ function App() {
 
   // ─── Firestore sync helper — saves changed items OUTSIDE setState ────
   const syncToFirestore = useCallback(async (collectionName, prev, next, idField = "id") => {
-    if (!Array.isArray(next)) return;
+    if (!Array.isArray(next)) {
+      console.warn("[SYNC] next is not array for", collectionName);
+      return;
+    }
+    console.log("[SYNC] syncToFirestore called:", collectionName, "prev:", Array.isArray(prev) ? prev.length : "none", "next:", next.length);
     // Always save to localStorage as safety net
     saveToLocalBackup(collectionName, next);
     if (!dbReadyRef.current) {
@@ -10806,10 +10829,11 @@ function App() {
       const prevStr = prevItem ? JSON.stringify(sanitizeForFirestore(stripLargeFields(prevItem))) : null;
       const nextStr = JSON.stringify(sanitizeForFirestore(stripLargeFields(item)));
       if (!prevStr || prevStr !== nextStr) {
+        console.log("[SYNC] Item changed/new, saving:", collectionName, item[idField], prevStr ? "CHANGED" : "NEW");
         const ok = await fsSaveDocument(collectionName, item[idField], item);
         if (!ok) {
           allOk = false;
-          console.error("SAVE FAILED for", collectionName, item[idField]);
+          console.error("[SYNC] SAVE FAILED for", collectionName, item[idField]);
         }
       }
     }
@@ -10840,6 +10864,11 @@ function App() {
   const setWorkOrders = useCallback(updater => {
     const prev = workOrdersRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    console.log("[WO] setWorkOrders: prev count:", prev ? prev.length : 0, "next count:", next ? next.length : 0);
+    if (next && prev && next.length > prev.length) {
+      const newIds = next.filter(n => !prev.some(p => p.id === n.id)).map(n => n.id);
+      console.log("[WO] NEW work orders:", newIds);
+    }
     workOrdersRef.current = next; // Immediately update ref to prevent stale reads
     setWorkOrdersState(next);
     syncToFirestore(COLLECTIONS.workOrders, prev, next);
