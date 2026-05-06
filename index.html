@@ -33,7 +33,6 @@
 <body>
 <div id="root"><div class="brl-loading">טוען Bariline CRM...</div></div>
 <script>
-// Sequential loader: guarantees each script is fully loaded before the next
 function loadScript(src) {
   return new Promise(function(resolve, reject) {
     var s = document.createElement('script');
@@ -78,7 +77,6 @@ loadReact().then(async function(ok) {
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
-  // Load Firebase
   try {
     await loadScript(firebaseAppUrl);
     await loadScript(firebaseFirestoreUrl);
@@ -4543,7 +4541,7 @@ const WorkOrdersPage = ({
     return ms && mst && mInst;
   }).sort((a, b) => (a.createdDate || a.scheduledDate || "") > (b.createdDate || b.scheduledDate || "") ? -1 : 1);
   const createOrder = () => {
-    const installer = installers.find(i => i.id === Number(newOrder.installerId));
+    const installer = newOrder.installerId ? installers.find(i => String(i.id) === String(newOrder.installerId)) : null;
     const order = {
       id: `WO-2026-${String(workOrders.length + 1).padStart(3, "0")}`,
       customerId: null,
@@ -4753,7 +4751,7 @@ const WorkOrdersPage = ({
     setTakeJobTimeTo("");
   };
   const adminChangeInstaller = (woId, newInstId) => {
-    const inst = installers.find(i => i.id === Number(newInstId));
+    const inst = installers.find(i => String(i.id) === String(newInstId));
     if (!inst) return;
     const wo = workOrders.find(w => w.id === woId);
     setWorkOrders(prev => prev.map(w => w.id === woId ? addLog({
@@ -6921,7 +6919,7 @@ const WorkOrdersPage = ({
     style: inputStyle,
     value: editOrder.installerId || "",
     onChange: e => {
-      const inst = installers.find(i => i.id === Number(e.target.value));
+      const inst = installers.find(i => String(i.id) === String(e.target.value));
       setEditOrder({
         ...editOrder,
         installerId: inst ? inst.id : null,
@@ -7598,7 +7596,7 @@ const ServiceCallsPage = ({
     setTakeSCTimeTo("");
   };
   const adminAssignCall = (scId, instId) => {
-    const inst = installers.find(i => i.id === Number(instId));
+    const inst = installers.find(i => String(i.id) === String(instId));
     if (!inst) return;
     const now = new Date().toISOString().split("T")[0];
     setServiceCalls(prev => prev.map(sc => sc.id === scId ? {
