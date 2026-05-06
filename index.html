@@ -33,6 +33,7 @@
 <body>
 <div id="root"><div class="brl-loading">טוען Bariline CRM...</div></div>
 <script>
+// Sequential loader: guarantees each script is fully loaded before the next
 function loadScript(src) {
   return new Promise(function(resolve, reject) {
     var s = document.createElement('script');
@@ -77,6 +78,7 @@ loadReact().then(async function(ok) {
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
+  // Load Firebase
   try {
     await loadScript(firebaseAppUrl);
     await loadScript(firebaseFirestoreUrl);
@@ -10691,12 +10693,85 @@ function App() {
     if (status === "saved") saveTimerRef.current = setTimeout(() => setSaveStatus(null), 2000);
   };
 
+  // ─── localStorage fallback for data safety ────
+  const saveToLocalBackup = useCallback((collectionName, data) => {
+    try {
+      const stripped = data.map(item => {
+        const clean = {
+          ...item
+        };
+        // Remove large base64 fields to fit in localStorage
+        if (clean.photos && typeof clean.photos === "object") {
+          const p = {
+            ...clean.photos
+          };
+          Object.keys(p).forEach(k => {
+            if (typeof p[k] === "string" && p[k].length > 10000) p[k] = true;
+          });
+          clean.photos = p;
+        }
+        ["measurementPhoto", "orderPdfData", "signedWarrantyData"].forEach(f => {
+          if (typeof clean[f] === "string" && clean[f].length > 10000) clean[f] = true;
+        });
+        return clean;
+      });
+      localStorage.setItem(`bariline_backup_${collectionName}`, JSON.stringify(stripped));
+    } catch (e) {
+      console.warn("localStorage backup failed:", e);
+    }
+  }, []);
+  const loadFromLocalBackup = useCallback(collectionName => {
+    try {
+      const saved = localStorage.getItem(`bariline_backup_${collectionName}`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return null;
+  }, []);
+
+  // ─── Pending saves queue — retries saves that failed because DB wasn't ready ────
+  const pendingQueueRef = useRef([]);
+  const flushPendingQueue = useCallback(async () => {
+    if (pendingQueueRef.current.length === 0) return;
+    const queue = [...pendingQueueRef.current];
+    pendingQueueRef.current = [];
+    console.log("Flushing", queue.length, "pending Firestore saves...");
+    for (const {
+      collectionName,
+      item,
+      idField
+    } of queue) {
+      try {
+        await fsSaveDocument(collectionName, item[idField], item);
+      } catch (e) {
+        console.error("Flush save failed:", e);
+      }
+    }
+  }, []);
+
   // ─── Firestore sync helper — saves changed items OUTSIDE setState ────
   const syncToFirestore = useCallback(async (collectionName, prev, next, idField = "id") => {
     if (!Array.isArray(next)) return;
-    if (!dbReadyRef.current) return; // CRITICAL: don't sync before initial Firestore load completes
+    // Always save to localStorage as safety net
+    saveToLocalBackup(collectionName, next);
+    if (!dbReadyRef.current) {
+      // Queue new/changed items for later save when DB becomes ready
+      console.warn("DB not ready, queuing save for", collectionName);
+      const prevMap = new Map();
+      if (Array.isArray(prev)) prev.forEach(item => prevMap.set(String(item[idField]), item));
+      for (const item of next) {
+        const key = String(item[idField]);
+        if (!prevMap.has(key)) {
+          pendingQueueRef.current.push({
+            collectionName,
+            item,
+            idField
+          });
+        }
+      }
+      return;
+    }
     if (!getDb()) {
-      console.warn("Firestore not ready, skipping save for", collectionName);
+      console.warn("Firestore not available, data saved to localStorage backup for", collectionName);
       return;
     }
     showSaveStatus("saving");
@@ -10713,7 +10788,10 @@ function App() {
       const nextStr = JSON.stringify(sanitizeForFirestore(stripLargeFields(item)));
       if (!prevStr || prevStr !== nextStr) {
         const ok = await fsSaveDocument(collectionName, item[idField], item);
-        if (!ok) allOk = false;
+        if (!ok) {
+          allOk = false;
+          console.error("SAVE FAILED for", collectionName, item[idField]);
+        }
       }
     }
     // Delete removed items
@@ -10725,7 +10803,7 @@ function App() {
       }
     }
     showSaveStatus(allOk ? "saved" : "error");
-  }, []);
+  }, [saveToLocalBackup]);
 
   // ─── Firestore sync wrappers ────
   const workOrdersRef = useRef(workOrders);
@@ -10733,6 +10811,7 @@ function App() {
   const setWorkOrders = useCallback(updater => {
     const prev = workOrdersRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    workOrdersRef.current = next; // Immediately update ref to prevent stale reads
     setWorkOrdersState(next);
     syncToFirestore(COLLECTIONS.workOrders, prev, next);
   }, [syncToFirestore]);
@@ -10741,6 +10820,7 @@ function App() {
   const setAccounts = useCallback(updater => {
     const prev = accountsRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    accountsRef.current = next;
     setAccountsState(next);
     syncToFirestore(COLLECTIONS.accounts, prev, next);
   }, [syncToFirestore]);
@@ -10749,6 +10829,7 @@ function App() {
   const setServiceCalls = useCallback(updater => {
     const prev = serviceCallsRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    serviceCallsRef.current = next;
     setServiceCallsState(next);
     syncToFirestore(COLLECTIONS.serviceCalls, prev, next);
   }, [syncToFirestore]);
@@ -10757,6 +10838,7 @@ function App() {
   const setInstallers = useCallback(updater => {
     const prev = installersRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    installersRef.current = next;
     setInstallersState(next);
     syncToFirestore(COLLECTIONS.installers, prev, next);
   }, [syncToFirestore]);
@@ -10767,11 +10849,23 @@ function App() {
     if (!db) {
       if (isInitial) {
         setDbStatus("offline");
-        {
-          dbReadyRef.current = true;
-          setDbReady(true);
+        // Try localStorage backup when offline
+        const backupAccounts = loadFromLocalBackup(COLLECTIONS.accounts);
+        setAccountsState(backupAccounts && backupAccounts.length > 0 ? backupAccounts : ACCOUNTS_DATA);
+        const backupWO = loadFromLocalBackup(COLLECTIONS.workOrders);
+        if (backupWO && backupWO.length > 0) {
+          setWorkOrdersState(backupWO);
+          workOrdersRef.current = backupWO;
         }
-        ;
+        const backupSC = loadFromLocalBackup(COLLECTIONS.serviceCalls);
+        if (backupSC && backupSC.length > 0) setServiceCallsState(backupSC);
+        const backupInst = loadFromLocalBackup(COLLECTIONS.installers);
+        if (backupInst && backupInst.length > 0) {
+          setInstallersState(backupInst);
+          installersRef.current = backupInst;
+        }
+        dbReadyRef.current = true;
+        setDbReady(true);
       }
       return;
     }
@@ -10835,25 +10929,72 @@ function App() {
       }
 
       // Update state with Firestore data (no sync-back)
-      if (fsAccounts && fsAccounts.length > 0) setAccountsState(fsAccounts);else if (isInitial) setAccountsState(ACCOUNTS_DATA); // fallback only if truly no data
-      if (fsWorkOrders && fsWorkOrders.length > 0) setWorkOrdersState(fsWorkOrders);
-      if (fsServiceCalls && fsServiceCalls.length > 0) setServiceCallsState(fsServiceCalls);
-      if (fsInstallers && fsInstallers.length > 0) setInstallersState(fsInstallers);
+      // Use localStorage backup as fallback if Firestore returns empty
+      if (fsAccounts && fsAccounts.length > 0) {
+        setAccountsState(fsAccounts);
+        saveToLocalBackup(COLLECTIONS.accounts, fsAccounts);
+      } else if (isInitial) {
+        const backup = loadFromLocalBackup(COLLECTIONS.accounts);
+        if (backup && backup.length > 0) setAccountsState(backup);else setAccountsState(ACCOUNTS_DATA);
+      }
+      if (fsWorkOrders && fsWorkOrders.length > 0) {
+        setWorkOrdersState(fsWorkOrders);
+        workOrdersRef.current = fsWorkOrders;
+        saveToLocalBackup(COLLECTIONS.workOrders, fsWorkOrders);
+      } else if (isInitial) {
+        const backup = loadFromLocalBackup(COLLECTIONS.workOrders);
+        if (backup && backup.length > 0) {
+          setWorkOrdersState(backup);
+          workOrdersRef.current = backup;
+        }
+      }
+      if (fsServiceCalls && fsServiceCalls.length > 0) {
+        setServiceCallsState(fsServiceCalls);
+        saveToLocalBackup(COLLECTIONS.serviceCalls, fsServiceCalls);
+      } else if (isInitial) {
+        const backup = loadFromLocalBackup(COLLECTIONS.serviceCalls);
+        if (backup && backup.length > 0) setServiceCallsState(backup);
+      }
+      if (fsInstallers && fsInstallers.length > 0) {
+        setInstallersState(fsInstallers);
+        installersRef.current = fsInstallers;
+        saveToLocalBackup(COLLECTIONS.installers, fsInstallers);
+      } else if (isInitial) {
+        const backup = loadFromLocalBackup(COLLECTIONS.installers);
+        if (backup && backup.length > 0) {
+          setInstallersState(backup);
+          installersRef.current = backup;
+        }
+      }
       setDbStatus("online");
     } catch (err) {
       console.error("Firestore load error:", err);
       if (isInitial) {
         setDbStatus("offline");
-        // Offline fallback: use defaults ONLY for login, but don't sync them
-        setAccountsState(ACCOUNTS_DATA);
+        // Offline fallback: try localStorage backup first, then defaults for accounts
+        const backupAccounts = loadFromLocalBackup(COLLECTIONS.accounts);
+        setAccountsState(backupAccounts && backupAccounts.length > 0 ? backupAccounts : ACCOUNTS_DATA);
+        const backupWO = loadFromLocalBackup(COLLECTIONS.workOrders);
+        if (backupWO && backupWO.length > 0) {
+          setWorkOrdersState(backupWO);
+          workOrdersRef.current = backupWO;
+        }
+        const backupSC = loadFromLocalBackup(COLLECTIONS.serviceCalls);
+        if (backupSC && backupSC.length > 0) setServiceCallsState(backupSC);
+        const backupInst = loadFromLocalBackup(COLLECTIONS.installers);
+        if (backupInst && backupInst.length > 0) {
+          setInstallersState(backupInst);
+          installersRef.current = backupInst;
+        }
       }
     }
     if (isInitial) {
       dbReadyRef.current = true;
       setDbReady(true);
+      // Flush any saves that were queued while DB was loading
+      setTimeout(() => flushPendingQueue(), 100);
     }
-    ;
-  }, []);
+  }, [saveToLocalBackup, loadFromLocalBackup, flushPendingQueue]);
 
   // Initial load on mount
   useEffect(() => {
