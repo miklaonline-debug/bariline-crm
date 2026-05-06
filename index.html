@@ -10640,19 +10640,45 @@ function App() {
   const [warrantyPdf, setWarrantyPdfState] = useState(null);
   const warrantyPdfLoaded = useRef(false);
 
-  // Load warranty PDF from IndexedDB on mount (handles large files that exceed localStorage limits)
+  // Load warranty PDF from Firestore (shared across all devices) → fallback to IndexedDB → fallback to localStorage
   useEffect(() => {
     if (warrantyPdfLoaded.current) return;
     warrantyPdfLoaded.current = true;
     (async () => {
       try {
-        // Try IndexedDB first (new storage)
+        // 1. Try Firestore first (shared across all devices)
+        const db = getDb();
+        if (db) {
+          try {
+            const doc = await db.collection("_meta").doc("warrantyPdf").get();
+            if (doc.exists) {
+              const fsData = doc.data();
+              if (fsData && fsData.base64) {
+                console.log("[WARRANTY] Loaded from Firestore:", fsData.name);
+                setWarrantyPdfState({
+                  name: fsData.name,
+                  base64: fsData.base64
+                });
+                // Cache locally in IndexedDB for offline use
+                await idbSet("warrantyPdf", {
+                  name: fsData.name,
+                  base64: fsData.base64
+                });
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn("[WARRANTY] Firestore load failed, trying local:", e);
+          }
+        }
+        // 2. Fallback to IndexedDB (local cache / offline)
         const idbVal = await idbGet("warrantyPdf");
         if (idbVal) {
+          console.log("[WARRANTY] Loaded from IndexedDB");
           setWarrantyPdfState(idbVal);
           return;
         }
-        // Migrate from localStorage if present (old storage)
+        // 3. Migrate from old localStorage if present
         const lsVal = localStorage.getItem("bariline_warrantyPdf");
         if (lsVal) {
           const parsed = JSON.parse(lsVal);
@@ -10669,9 +10695,26 @@ function App() {
     setWarrantyPdfState(val);
     (async () => {
       try {
+        // Save to IndexedDB (local cache)
         if (val) await idbSet("warrantyPdf", val);else await idbDelete("warrantyPdf");
+        // Save to Firestore (shared across all devices)
+        const db = getDb();
+        if (db) {
+          if (val) {
+            console.log("[WARRANTY] Saving to Firestore:", val.name, Math.round(val.base64.length / 1024) + "KB");
+            await db.collection("_meta").doc("warrantyPdf").set({
+              name: val.name,
+              base64: val.base64,
+              updatedAt: new Date().toISOString()
+            });
+            console.log("[WARRANTY] Saved to Firestore successfully");
+          } else {
+            await db.collection("_meta").doc("warrantyPdf").delete();
+            console.log("[WARRANTY] Deleted from Firestore");
+          }
+        }
       } catch (e) {
-        console.warn("Failed to save warranty PDF to IndexedDB:", e);
+        console.warn("Failed to save warranty PDF:", e);
       }
     })();
   }, []);
@@ -11112,6 +11155,25 @@ function App() {
       setDbReady(true);
       // Flush any saves that were queued while DB was loading
       setTimeout(() => flushPendingQueue(), 100);
+      // Load warranty PDF from Firestore (ensures all devices get the latest version)
+      const wpDb = getDb();
+      if (wpDb) {
+        wpDb.collection("_meta").doc("warrantyPdf").get().then(function (doc) {
+          if (doc.exists && doc.data() && doc.data().base64) {
+            console.log("[WARRANTY] Loaded from Firestore (post-init):", doc.data().name);
+            setWarrantyPdfState({
+              name: doc.data().name,
+              base64: doc.data().base64
+            });
+            idbSet("warrantyPdf", {
+              name: doc.data().name,
+              base64: doc.data().base64
+            }).catch(function () {});
+          }
+        }).catch(function (e) {
+          console.warn("[WARRANTY] Post-init load failed:", e);
+        });
+      }
     }
   }, [saveToLocalBackup, loadFromLocalBackup, flushPendingQueue]);
 
