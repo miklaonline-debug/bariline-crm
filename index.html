@@ -6688,7 +6688,7 @@ const WorkOrdersPage = ({
         gap: 8,
         flexWrap: "wrap"
       }
-    }, selected.status === "pending" && role === "installer" && !selected.installerId && /*#__PURE__*/React.createElement(Button, {
+    }, selected.status === "pending" && role === "installer" && (!selected.installerId || selected.installerId === installerId) && /*#__PURE__*/React.createElement(Button, {
       onClick: () => setShowTakeJobModal(selected.id)
     }, "קח עבודה"), selected.status === "pending" && role === "installer" && selIsStandard === false && selected.glassReady && !selected.glassReadyMatched && selected.installerId && /*#__PURE__*/React.createElement(Button, {
       onClick: () => setShowTakeJobModal(selected.id)
@@ -10676,6 +10676,23 @@ function App() {
         if (idbVal) {
           console.log("[WARRANTY] Loaded from IndexedDB");
           setWarrantyPdfState(idbVal);
+          // Auto-migrate to Firestore if not there yet
+          const migrateDb = getDb();
+          if (migrateDb && idbVal.base64) {
+            try {
+              const check = await migrateDb.collection("_meta").doc("warrantyPdf").get();
+              if (!check.exists) {
+                console.log("[WARRANTY] Migrating IndexedDB → Firestore");
+                await migrateDb.collection("_meta").doc("warrantyPdf").set({
+                  name: idbVal.name,
+                  base64: idbVal.base64,
+                  updatedAt: new Date().toISOString()
+                });
+              }
+            } catch (e) {
+              console.warn("[WARRANTY] Migration failed:", e);
+            }
+          }
           return;
         }
         // 3. Migrate from old localStorage if present
